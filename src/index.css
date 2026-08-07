@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  @apply bg-slate-50 text-slate-800 antialiased;
+}
+
+/* Grade slider thumb */
+input[type='range']::-webkit-slider-thumb {
+  @apply appearance-none w-5 h-5 rounded-full bg-uvm-blue cursor-pointer;
+}
+input[type='range']::-moz-range-thumb {
+  @apply w-5 h-5 rounded-full bg-uvm-blue cursor-pointer border-0;
+}
