@@ -2,34 +2,41 @@ import React from 'react';
 
 export default function StepBar({ steps, current }) {
   return (
-    <div className="bg-white border-b border-slate-200 shadow-sm">
-      <div className="max-w-4xl mx-auto px-4 py-2 flex items-center gap-0">
+    <nav className="bg-[#0d1c30] border-b border-blue-900 shadow-sm">
+      <div className="w-full px-6 flex items-stretch">
         {steps.map((label, i) => {
           const done = i < current;
           const active = i === current;
           return (
             <React.Fragment key={label}>
               {i > 0 && (
-                <div className={`flex-1 h-0.5 ${done ? 'bg-uvm-blue' : 'bg-slate-200'}`} />
+                <span className="self-center text-blue-700 select-none px-0.5">|</span>
               )}
-              <div className="flex flex-col items-center">
-                <div
-                  className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold transition-colors
-                    ${done ? 'bg-uvm-blue text-white' : ''}
-                    ${active ? 'bg-uvm-blue text-white ring-2 ring-blue-300' : ''}
-                    ${!done && !active ? 'bg-slate-200 text-slate-500' : ''}
-                  `}
-                >
-                  {done ? '✓' : i + 1}
-                </div>
-                <span className={`text-[10px] mt-0.5 font-medium whitespace-nowrap ${active ? 'text-uvm-blue' : 'text-slate-400'}`}>
-                  {label}
-                </span>
+              <div
+                className={`relative flex items-center gap-1.5 px-4 py-3 text-xs font-semibold uppercase tracking-wide transition-colors
+                  ${active ? 'text-white border-b-2 border-uvm-gold' : ''}
+                  ${done ? 'text-blue-300' : ''}
+                  ${!done && !active ? 'text-blue-500' : ''}
+                `}
+              >
+                {done && (
+                  <span className="text-uvm-gold text-[11px] font-bold">✓</span>
+                )}
+                {!done && (
+                  <span
+                    className={`w-4 h-4 rounded-full flex items-center justify-center text-[9px] font-bold
+                      ${active ? 'bg-uvm-gold text-[#0d1c30]' : 'bg-blue-800 text-blue-400'}
+                    `}
+                  >
+                    {i + 1}
+                  </span>
+                )}
+                {label}
               </div>
             </React.Fragment>
           );
         })}
       </div>
-    </div>
+    </nav>
   );
 }

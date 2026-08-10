@@ -7,13 +7,15 @@ export default function Header() {
 
   return (
     <header className="bg-uvm-blue text-white shadow-md">
-      <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
-        <div>
-          <div className="text-xs font-medium text-blue-200 uppercase tracking-widest">
-            Universidad Viña del Mar · Ingeniería en Construcción
-          </div>
-          <div className="text-base font-bold leading-tight">
-            Corrector IA — Formulación de Proyecto de Título
+      <div className="w-full px-6 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex flex-col">
+            <div className="text-[10px] font-semibold text-blue-200 uppercase tracking-widest">
+              Universidad Viña del Mar · Ingeniería en Construcción
+            </div>
+            <div className="text-base font-bold leading-tight">
+              Corrector IA — Formulación de Proyecto de Título
+            </div>
           </div>
         </div>
         {step !== 'setup' && (
