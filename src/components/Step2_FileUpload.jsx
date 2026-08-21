@@ -30,9 +30,10 @@ function guessRole(file, delivery) {
   if (ext === 'pdf') return 'respaldo';
   if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) return 'imagen';
   if (ext === 'xlsx' || ext === 'xls') {
-    if (/cotiz|cot_|proveedor/.test(name)) return 'cotizaciones';
     if (/apu|analisis|precios|unitarios|cartilla/.test(name)) return 'apu';
     if (/listado|cubic|itemizado|partidas/.test(name)) return 'cubicaciones';
+    // Solo asignar cotizaciones si no tiene palabras de cubicaciones
+    if (/cotiz|cot_|proveedor/.test(name) && !/cubic|listado/.test(name)) return 'cotizaciones';
     return 'cubicaciones';
   }
   return 'respaldo';
@@ -172,23 +173,20 @@ export default function Step2_FileUpload() {
               )}
 
               {/* Role selector (Excel and Word) */}
-              {/\.(xlsx?|docx?)$/i.test(entry.file.name) && (() => {
-                const isWord = /\.docx?$/i.test(entry.file.name);
-                const opts = isWord
-                  ? roleOptions.filter(r => ['eett', 'cotizaciones'].includes(r.value))
-                  : roleOptions.filter(r => !['respaldo', 'imagen', 'eett'].includes(r.value));
-                return (
-                  <select
-                    value={entry.role}
-                    onChange={e => updateFileRole(entry.id, e.target.value)}
-                    className="text-xs border border-slate-300 rounded px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-uvm-blue"
-                  >
-                    {opts.map(r => (
-                      <option key={r.value} value={r.value}>{r.label}</option>
-                    ))}
-                  </select>
-                );
-              })()}
+              {/\.(xlsx?|docx?)$/i.test(entry.file.name) && (
+                <select
+                  value={entry.role}
+                  onChange={e => updateFileRole(entry.id, e.target.value)}
+                  className="text-xs border border-slate-300 rounded px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-uvm-blue"
+                >
+                  {(/\.docx?$/i.test(entry.file.name)
+                    ? roleOptions.filter(r => ['eett', 'cotizaciones'].includes(r.value))
+                    : roleOptions.filter(r => !['respaldo', 'imagen', 'eett'].includes(r.value))
+                  ).map(r => (
+                    <option key={r.value} value={r.value}>{r.label}</option>
+                  ))}
+                </select>
+              )}
 
               <button
                 onClick={() => removeFile(entry.id)}
