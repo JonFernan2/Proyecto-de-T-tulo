@@ -50,13 +50,10 @@ export function runAdmissibility(delivery, filesMap) {
   const cotThreshold = 0.8;
 
   if (wordCotFiles.length > 0) {
-    // Word-based: admissible if ≥1 file present with text content
-    const totalWords = wordCotFiles.reduce((s, f) => s + (f.parsed?.wordCount ?? 0), 0);
-    cotPassed = wordCotFiles.length >= 1 && totalWords > 100;
-    cotRatio = cotPassed ? 1.0 : 0;
-    cotDetail = cotPassed
-      ? `${wordCotFiles.length} archivo(s) Word de cotizaciones con ${totalWords.toLocaleString('es-CL')} palabras totales.`
-      : 'Archivos Word de cotizaciones vacíos o ilegibles.';
+    // Word-based: format is incorrect per pauta — force 1.0 on that criterion
+    cotPassed = false;
+    cotRatio = 0;
+    cotDetail = `Formato incorrecto: se entregaron ${wordCotFiles.length} archivo(s) Word. La pauta exige Excel con tabla de proveedores. El criterio se calificará con nota 1,0.`;
   } else if (excelCotFile) {
     const cotCoverage = measureCotizacionesCoverage(excelCotFile);
     cotPassed = cotCoverage.total > 0 && cotCoverage.ratio >= cotThreshold;
@@ -77,6 +74,7 @@ export function runAdmissibility(delivery, filesMap) {
     ratio: cotRatio,
     threshold: cotThreshold,
     detail: cotDetail,
+    forceScore: cotPassed ? undefined : 1.0,
   });
 
   // ── APU (solo E2) ────────────────────────────────────────────────────────────

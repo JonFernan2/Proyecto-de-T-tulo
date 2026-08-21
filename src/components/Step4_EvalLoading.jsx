@@ -46,12 +46,24 @@ export default function Step4_EvalLoading() {
 
     evaluateWithClaude({ delivery, studentName, filesMap, images })
       .then(evaluation => {
-        // Initialize adjustments with AI scores
-        const { setAdjustment, setGlobalScore } = useGradingStore.getState();
-        for (const c of evaluation.criteria ?? []) {
-          setAdjustment(c.id, 'score', c.score);
-          setAdjustment(c.id, 'observation', '');
+        const { setAdjustment, setGlobalScore, admissibility } = useGradingStore.getState();
+
+        // Build forceScore map from admissibility results
+        const forced = {};
+        for (const r of admissibility?.results ?? []) {
+          if (r.forceScore !== undefined) forced[r.id] = r.forceScore;
         }
+
+        // Initialize adjustments — apply forceScore overrides where needed
+        for (const c of evaluation.criteria ?? []) {
+          const score = forced[c.id] !== undefined ? forced[c.id] : c.score;
+          const obs = forced[c.id] !== undefined
+            ? 'Formato incorrecto según la pauta. Nota mínima aplicada automáticamente.'
+            : '';
+          setAdjustment(c.id, 'score', score);
+          setAdjustment(c.id, 'observation', obs);
+        }
+
         setGlobalScore(evaluation.globalScore);
         setEvaluation(evaluation);
         goTo('results');

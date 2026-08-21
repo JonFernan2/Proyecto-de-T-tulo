@@ -122,20 +122,18 @@ export default function Step3_Admissibility() {
         {!passed && (
           <button
             onClick={exportRejectionPDF}
-            className="flex-1 py-2.5 rounded-lg font-semibold text-white bg-red-600 hover:bg-red-700"
+            className="px-4 py-2.5 rounded-lg font-semibold text-white bg-red-600 hover:bg-red-700 text-sm"
           >
-            📄 Exportar rechazo (Nota 1,0)
+            📄 Exportar rechazo
           </button>
         )}
 
-        {passed && (
-          <button
-            onClick={() => goTo('evaluating')}
-            className="flex-1 py-2.5 rounded-lg font-semibold text-white bg-uvm-blue hover:bg-blue-800"
-          >
-            Evaluar con IA →
-          </button>
-        )}
+        <button
+          onClick={() => goTo('evaluating')}
+          className="flex-1 py-2.5 rounded-lg font-semibold text-white bg-uvm-blue hover:bg-blue-800"
+        >
+          Evaluar con IA →
+        </button>
       </div>
     </div>
   );
