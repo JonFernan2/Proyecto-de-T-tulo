@@ -40,7 +40,7 @@ export const DELIVERIES = {
     expectedFiles: [
       { role: 'eett', label: 'EETT modificadas', formats: ['.docx'], required: true, multiple: false },
       { role: 'cubicaciones', label: 'Listado + Cubicaciones', formats: ['.xlsx'], required: true, multiple: false },
-      { role: 'cotizaciones', label: 'Cotizaciones', formats: ['.xlsx'], required: true, multiple: false },
+      { role: 'cotizaciones', label: 'Cotizaciones', formats: ['.xlsx', '.docx'], required: false, multiple: true },
       { role: 'respaldo', label: 'Respaldo cotizaciones (PDFs)', formats: ['.pdf'], required: false, multiple: true },
       { role: 'imagen', label: 'Respaldo cubicaciones (imágenes)', formats: ['.jpg', '.jpeg', '.png'], required: false, multiple: true },
     ],
@@ -92,7 +92,7 @@ export const DELIVERIES = {
     expectedFiles: [
       { role: 'eett', label: 'EETT E1 (re-verificación)', formats: ['.docx'], required: true, multiple: false },
       { role: 'cubicaciones', label: 'Listado + Cubicaciones E1', formats: ['.xlsx'], required: true, multiple: false },
-      { role: 'cotizaciones', label: 'Cotizaciones E1', formats: ['.xlsx'], required: true, multiple: false },
+      { role: 'cotizaciones', label: 'Cotizaciones E1', formats: ['.xlsx', '.docx'], required: false, multiple: true },
       { role: 'apu', label: 'APU — Cartillas (Anexo 01)', formats: ['.xlsx'], required: true, multiple: false },
     ],
     admissibility: {
