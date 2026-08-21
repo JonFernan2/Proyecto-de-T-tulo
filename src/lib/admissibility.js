@@ -41,19 +41,42 @@ export function runAdmissibility(delivery, filesMap) {
   });
 
   // ── Cotizaciones ──────────────────────────────────────────────────────────────
-  const cotCoverage = measureCotizacionesCoverage(filesMap.cotizaciones);
+  // Support Word-based cotizaciones (multiple .docx files) and Excel
+  const cotFiles = filesMap.cotizacionesFiles ?? [];
+  const wordCotFiles = cotFiles.filter(f => f.parsed?.text !== undefined);
+  const excelCotFile = filesMap.cotizaciones?.sheets ? filesMap.cotizaciones : null;
+
+  let cotPassed, cotDetail, cotRatio;
   const cotThreshold = 0.8;
-  const cotPassed = cotCoverage.total > 0 && cotCoverage.ratio >= cotThreshold;
+
+  if (wordCotFiles.length > 0) {
+    // Word-based: admissible if ≥1 file present with text content
+    const totalWords = wordCotFiles.reduce((s, f) => s + (f.parsed?.wordCount ?? 0), 0);
+    cotPassed = wordCotFiles.length >= 1 && totalWords > 100;
+    cotRatio = cotPassed ? 1.0 : 0;
+    cotDetail = cotPassed
+      ? `${wordCotFiles.length} archivo(s) Word de cotizaciones con ${totalWords.toLocaleString('es-CL')} palabras totales.`
+      : 'Archivos Word de cotizaciones vacíos o ilegibles.';
+  } else if (excelCotFile) {
+    const cotCoverage = measureCotizacionesCoverage(excelCotFile);
+    cotPassed = cotCoverage.total > 0 && cotCoverage.ratio >= cotThreshold;
+    cotRatio = cotCoverage.ratio;
+    cotDetail = cotCoverage.total === 0
+      ? 'No se encontró archivo de cotizaciones o no contiene materiales legibles.'
+      : `${cotCoverage.quoted} de ${cotCoverage.total} materiales cotizados (${pct(cotCoverage.ratio)}).`;
+  } else {
+    cotPassed = false;
+    cotRatio = 0;
+    cotDetail = 'No se encontró archivo de cotizaciones.';
+  }
+
   results.push({
     id: 'cotizaciones',
     label: `Cotizaciones (mín. ${cotThreshold * 100}% de materiales)`,
     passed: cotPassed,
-    ratio: cotCoverage.ratio,
+    ratio: cotRatio,
     threshold: cotThreshold,
-    detail:
-      cotCoverage.total === 0
-        ? 'No se encontró archivo de cotizaciones o no contiene materiales legibles.'
-        : `${cotCoverage.quoted} de ${cotCoverage.total} materiales cotizados (${pct(cotCoverage.ratio)}).`,
+    detail: cotDetail,
   });
 
   // ── APU (solo E2) ────────────────────────────────────────────────────────────

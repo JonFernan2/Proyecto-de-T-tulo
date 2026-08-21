@@ -13,6 +13,12 @@ export async function evaluateWithClaude({ delivery, studentName, filesMap, imag
       : null,
     cubicaciones: filesMap.cubicaciones ?? null,
     cotizaciones: filesMap.cotizaciones ?? null,
+    cotizacionesFiles: (filesMap.cotizacionesFiles ?? []).map(f => ({
+      name: f.name,
+      parsed: f.parsed?.text !== undefined
+        ? { text: f.parsed.text, hasHighlights: f.parsed.hasHighlights, hasStrikethrough: f.parsed.hasStrikethrough, wordCount: f.parsed.wordCount }
+        : f.parsed,
+    })),
     apu: filesMap.apu ?? null,
     images: images ?? [],
     pdfNames: filesMap.respaldoPdfNames ?? [],

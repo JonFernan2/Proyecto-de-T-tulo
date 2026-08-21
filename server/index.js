@@ -62,7 +62,7 @@ Cada justificación debe ser concisa (3-5 oraciones), específica (señala qué 
 }
 
 function buildUserContent(delivery, studentName, payload) {
-  const { eett, cubicaciones, cotizaciones, apu, images, pdfNames } = payload;
+  const { eett, cubicaciones, cotizaciones, cotizacionesFiles, apu, images, pdfNames } = payload;
 
   const contentBlocks = [];
 
@@ -73,14 +73,33 @@ function buildUserContent(delivery, studentName, payload) {
   if (delivery === 'E1') {
     text += formatEett(eett);
     text += formatExcel('LISTADO DE ACTIVIDADES Y CUBICACIONES', cubicaciones);
-    text += formatExcel('COTIZACIONES', cotizaciones);
+    // Cotizaciones: accept Word docs or Excel
+    const wordCots = (cotizacionesFiles ?? []).filter(f => f.parsed?.text !== undefined);
+    if (wordCots.length > 0) {
+      text += `\n### COTIZACIONES (${wordCots.length} archivos Word)\n`;
+      wordCots.forEach(({ name, parsed }) => {
+        text += `\n**Archivo: ${name}**\n`;
+        text += formatEett(parsed);
+      });
+    } else {
+      text += formatExcel('COTIZACIONES', cotizaciones);
+    }
     if (pdfNames?.length) {
       text += `\n### PDFs de respaldo cotizaciones\n${pdfNames.map(n => `- ${n}`).join('\n')}\n`;
     }
   } else {
     text += formatEett(eett);
     text += formatExcel('LISTADO + CUBICACIONES (referencia E1)', cubicaciones);
-    text += formatExcel('COTIZACIONES (referencia E1)', cotizaciones);
+    const wordCots = (cotizacionesFiles ?? []).filter(f => f.parsed?.text !== undefined);
+    if (wordCots.length > 0) {
+      text += `\n### COTIZACIONES E1 (${wordCots.length} archivos Word)\n`;
+      wordCots.forEach(({ name, parsed }) => {
+        text += `\n**Archivo: ${name}**\n`;
+        text += formatEett(parsed);
+      });
+    } else {
+      text += formatExcel('COTIZACIONES (referencia E1)', cotizaciones);
+    }
     text += formatExcel('APU — ANÁLISIS DE PRECIOS UNITARIOS', apu);
   }
 

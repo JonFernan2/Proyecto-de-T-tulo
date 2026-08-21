@@ -44,15 +44,17 @@ export const useGradingStore = create((set, get) => ({
     }));
   },
 
-  // Build filesMap: { eett, cubicaciones, cotizaciones, apu, respaldoPdfNames }
+  // Build filesMap: { eett, cubicaciones, cotizaciones, cotizacionesFiles, apu, respaldoPdfNames }
   getFilesMap() {
     const files = get().uploadedFiles;
     const byRole = role => files.find(f => f.role === role)?.parsed ?? null;
+    const allByRole = role => files.filter(f => f.role === role).map(f => ({ parsed: f.parsed, name: f.file.name }));
     const pdfNames = files.filter(f => f.role === 'respaldo').map(f => f.file.name);
     return {
       eett: byRole('eett'),
       cubicaciones: byRole('cubicaciones'),
       cotizaciones: byRole('cotizaciones'),
+      cotizacionesFiles: allByRole('cotizaciones'),
       apu: byRole('apu'),
       respaldoPdfNames: pdfNames,
     };
