@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
+import JSZip from 'jszip';
 import * as pdfjsLib from 'pdfjs-dist';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -52,26 +53,126 @@ export async function parseExcel(file) {
 export async function parseWord(file) {
   const arrayBuffer = await file.arrayBuffer();
 
-  // Extract HTML to detect highlights and strikethrough
-  const { value: html } = await mammoth.convertToHtml(
-    { arrayBuffer },
-    {
-      styleMap: [
-        "r[highlight] => mark",
-        "r[strike] => s",
-        "r[dstrike] => s",
-      ],
-    }
-  );
-
-  const hasHighlights = /<mark>/i.test(html) || /background-color:\s*yellow/i.test(html);
-  const hasStrikethrough = /<s[ >]/i.test(html) || /<del[ >]/i.test(html);
-
-  // Extract plain text
   const { value: text } = await mammoth.extractRawText({ arrayBuffer });
-  const wordCount = text.trim().split(/\s+/).length;
+  const wordCount = text.trim().split(/\s+/).filter(Boolean).length;
 
-  return { text, html, hasHighlights, hasStrikethrough, wordCount };
+  // Deep XML analysis — far more reliable than mammoth's style mapping
+  const marks = await analyzeDocxMarks(arrayBuffer);
+
+  return {
+    text,
+    wordCount,
+    source: 'docx',
+    verifiable: marks.verifiable,
+    hasHighlights: marks.highlightCount > 0,
+    hasStrikethrough: marks.strikeCount > 0,
+    highlightCount: marks.highlightCount,
+    strikeCount: marks.strikeCount,
+    highlightSamples: marks.highlightSamples,
+    strikeSamples: marks.strikeSamples,
+    highlightColors: marks.highlightColors,
+  };
+}
+
+/**
+ * Reads word/document.xml (plus headers/footers) straight out of the .docx zip
+ * and counts runs carrying highlight or strikethrough formatting.
+ *
+ * Detects BOTH ways Word marks text as highlighted:
+ *   <w:highlight w:val="yellow"/>   → "Text Highlight Color" button
+ *   <w:shd w:fill="FFFF00"/>        → "Shading" / paragraph fill
+ * and both strikethrough variants (<w:strike>, <w:dstrike>) plus tracked
+ * deletions (<w:del>), which students often use instead of manual striking.
+ */
+async function analyzeDocxMarks(arrayBuffer) {
+  const empty = {
+    verifiable: false, highlightCount: 0, strikeCount: 0,
+    highlightSamples: [], strikeSamples: [], highlightColors: [],
+  };
+
+  try {
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    const targets = Object.keys(zip.files).filter(n =>
+      /^word\/(document|header\d*|footer\d*)\.xml$/.test(n),
+    );
+    if (!targets.length) return empty;
+
+    let highlightCount = 0;
+    let strikeCount = 0;
+    const highlightSamples = [];
+    const strikeSamples = [];
+    const colors = new Set();
+
+    for (const name of targets) {
+      const xml = await zip.file(name).async('string');
+
+      // Tracked deletions carry their text in <w:delText>
+      const deletions = xml.match(/<w:delText[^>]*>[\s\S]*?<\/w:delText>/g) ?? [];
+      for (const d of deletions) {
+        const t = decodeXmlText(d.replace(/<[^>]+>/g, ''));
+        if (!t) continue;
+        strikeCount++;
+        if (strikeSamples.length < 15) strikeSamples.push(t.slice(0, 140));
+      }
+
+      // Walk every run <w:r ...> ... </w:r>
+      for (const run of xml.split(/<w:r[ >]/).slice(1)) {
+        const propsEnd = run.indexOf('</w:rPr>');
+        const props = propsEnd >= 0 ? run.slice(0, propsEnd) : '';
+
+        const runText = decodeXmlText(
+          [...run.matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g)].map(m => m[1]).join(''),
+        );
+        if (!runText) continue;
+
+        // ── Highlight ──────────────────────────────────────────────────────
+        let highlighted = false;
+        const hl = props.match(/<w:highlight[^>]*w:val="([^"]+)"/);
+        if (hl && hl[1].toLowerCase() !== 'none') {
+          highlighted = true;
+          colors.add(hl[1]);
+        }
+        const shd = props.match(/<w:shd[^>]*w:fill="([^"]+)"/);
+        if (shd && !/^(auto|FFFFFF|none)$/i.test(shd[1])) {
+          highlighted = true;
+          colors.add(`#${shd[1]}`);
+        }
+        if (highlighted) {
+          highlightCount++;
+          if (highlightSamples.length < 15) highlightSamples.push(runText.slice(0, 140));
+        }
+
+        // ── Strikethrough ──────────────────────────────────────────────────
+        const st = props.match(/<w:(strike|dstrike)(\s[^>]*)?\/?>/);
+        if (st && !/w:val="(false|0)"/.test(st[2] ?? '')) {
+          strikeCount++;
+          if (strikeSamples.length < 15) strikeSamples.push(runText.slice(0, 140));
+        }
+      }
+    }
+
+    return {
+      verifiable: true,
+      highlightCount,
+      strikeCount,
+      highlightSamples,
+      strikeSamples,
+      highlightColors: [...colors],
+    };
+  } catch (err) {
+    console.warn('[parseWord] No se pudo analizar el XML del .docx:', err.message);
+    return empty;
+  }
+}
+
+function decodeXmlText(s) {
+  return s
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .trim();
 }
 
 // ─── PDF (EETT) ───────────────────────────────────────────────────────────────
@@ -80,23 +181,50 @@ export async function parsePdf(file) {
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
   let fullText = '';
-  let hasHighlights = false;
-  let hasStrikethrough = false;
+  let highlightCount = 0;
+  let strikeCount = 0;
+  let totalAnnotations = 0;
+  const highlightSamples = [];
+  const strikeSamples = [];
 
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
 
     const textContent = await page.getTextContent();
-    const pageText = textContent.items.map(item => item.str).join(' ');
-    fullText += pageText + '\n';
+    fullText += textContent.items.map(item => item.str).join(' ') + '\n';
 
-    const annotations = await page.getAnnotations();
-    if (annotations.some(a => a.subtype === 'Highlight')) hasHighlights = true;
-    if (annotations.some(a => a.subtype === 'StrikeOut')) hasStrikethrough = true;
+    for (const a of await page.getAnnotations()) {
+      totalAnnotations++;
+      const note = (a.contents ?? '').trim();
+      if (a.subtype === 'Highlight') {
+        highlightCount++;
+        if (note && highlightSamples.length < 15) highlightSamples.push(note.slice(0, 140));
+      } else if (a.subtype === 'StrikeOut') {
+        strikeCount++;
+        if (note && strikeSamples.length < 15) strikeSamples.push(note.slice(0, 140));
+      }
+    }
   }
 
   const wordCount = fullText.trim().split(/\s+/).filter(Boolean).length;
-  return { text: fullText, wordCount, hasHighlights, hasStrikethrough };
+
+  // A PDF exported from Word ("flattened") keeps the colours visually but loses
+  // the annotation objects — so zero annotations is NOT proof of zero marking.
+  const verifiable = totalAnnotations > 0;
+
+  return {
+    text: fullText,
+    wordCount,
+    source: 'pdf',
+    verifiable,
+    hasHighlights: highlightCount > 0,
+    hasStrikethrough: strikeCount > 0,
+    highlightCount,
+    strikeCount,
+    highlightSamples,
+    strikeSamples,
+    highlightColors: [],
+  };
 }
 
 // ─── Image → base64 ───────────────────────────────────────────────────────────

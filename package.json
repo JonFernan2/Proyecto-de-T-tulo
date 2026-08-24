@@ -16,6 +16,7 @@
     "express": "^4.21.2",
     "jspdf": "^2.5.2",
     "jspdf-autotable": "^3.8.2",
+    "jszip": "^3.10.1",
     "mammoth": "^1.9.0",
     "pdfjs-dist": "^6.2.108",
     "react": "^18.3.1",

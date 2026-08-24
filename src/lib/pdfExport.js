@@ -7,6 +7,13 @@ const WHITE = [255, 255, 255];
 const LIGHT_GRAY = [245, 245, 245];
 const DARK_GRAY = [60, 60, 60];
 
+const ESTADO_COLORS = {
+  'Cumple': [22, 163, 74],
+  'Parcial': [202, 138, 4],
+  'No cumple': [220, 38, 38],
+  'No verificable': [100, 116, 139],
+};
+
 function gradeColor(score) {
   if (score < 4.0) return [220, 38, 38];    // red
   if (score < 4.5) return [245, 158, 11];   // amber
@@ -14,7 +21,7 @@ function gradeColor(score) {
   return [22, 163, 74];                      // green
 }
 
-export function generateFeedbackPDF({ delivery, studentName, admissibility, criteria, globalScore, globalJustification, globalObservation }) {
+export function generateFeedbackPDF({ delivery, studentName, admissibility, criteria, globalScore, globalJustification, globalObservation, resumen = [], fortalezas = [], mejoras = [] }) {
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const W = doc.internal.pageSize.getWidth();
   let y = 0;
@@ -95,9 +102,87 @@ export function generateFeedbackPDF({ delivery, studentName, admissibility, crit
 
   y = doc.lastAutoTable.finalY + 6;
 
+  // ── Cuadro resumen de la revisión ────────────────────────────────────────────
+  if (resumen.length) {
+    if (y > 230) { doc.addPage(); y = 20; }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(...DARK_GRAY);
+    doc.text('Cuadro Resumen de la Revisión', 14, y);
+    y += 4;
+
+    autoTable(doc, {
+      startY: y,
+      head: [['Aspecto revisado', 'Hallazgo', 'Estado']],
+      body: resumen.map(r => [r.aspecto, r.hallazgo, r.estado]),
+      theme: 'grid',
+      headStyles: { fillColor: BLUE, textColor: WHITE, fontSize: 8, fontStyle: 'bold' },
+      bodyStyles: { fontSize: 7.5, valign: 'top' },
+      columnStyles: {
+        0: { cellWidth: 45, fontStyle: 'bold' },
+        1: { cellWidth: 'auto' },
+        2: { cellWidth: 24, halign: 'center' },
+      },
+      didParseCell(data) {
+        if (data.column.index === 2 && data.section === 'body') {
+          const estado = data.cell.text[0];
+          data.cell.styles.fontStyle = 'bold';
+          data.cell.styles.textColor = ESTADO_COLORS[estado] ?? DARK_GRAY;
+        }
+      },
+      margin: { left: 14, right: 14 },
+    });
+
+    y = doc.lastAutoTable.finalY + 6;
+  }
+
+  // ── Fortalezas y mejoras ─────────────────────────────────────────────────────
+  if (fortalezas.length || mejoras.length) {
+    if (y > 240) { doc.addPage(); y = 20; }
+
+    if (fortalezas.length) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(22, 163, 74);
+      doc.text('Aspectos bien logrados', 14, y);
+      y += 5;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(...DARK_GRAY);
+      for (const f of fortalezas) {
+        if (y > 268) { doc.addPage(); y = 20; }
+        const lines = doc.splitTextToSize(`•  ${f}`, W - 34);
+        doc.text(lines, 18, y);
+        y += lines.length * 3.8 + 1.5;
+      }
+      y += 3;
+    }
+
+    if (mejoras.length) {
+      if (y > 250) { doc.addPage(); y = 20; }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.setTextColor(180, 83, 9);
+      doc.text('Acciones de mejora para la próxima entrega', 14, y);
+      y += 5;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(...DARK_GRAY);
+      for (const m of mejoras) {
+        if (y > 268) { doc.addPage(); y = 20; }
+        const lines = doc.splitTextToSize(`•  ${m}`, W - 34);
+        doc.text(lines, 18, y);
+        y += lines.length * 3.8 + 1.5;
+      }
+      y += 3;
+    }
+  }
+
   // ── Evaluation table ─────────────────────────────────────────────────────────
+  if (y > 235) { doc.addPage(); y = 20; }
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
+  doc.setTextColor(...DARK_GRAY);
   doc.text('Evaluación por Criterio', 14, y);
   y += 4;
 

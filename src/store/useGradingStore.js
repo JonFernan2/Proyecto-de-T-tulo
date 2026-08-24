@@ -44,19 +44,46 @@ export const useGradingStore = create((set, get) => ({
     }));
   },
 
-  // Build filesMap: { eett, cubicaciones, cotizaciones, cotizacionesFiles, apu, respaldoPdfNames }
+  // Build filesMap: { eett, cubicaciones, cotizaciones, cotizacionesFiles, apu, ... }
+  //
+  // Files of the same role are picked by CONTENT, not by upload order: a role
+  // holding a PDF plus an Excel must still surface the Excel as the sheet
+  // source, otherwise admissibility wrongly reports the file as missing.
   getFilesMap() {
     const files = get().uploadedFiles;
-    const byRole = role => files.find(f => f.role === role)?.parsed ?? null;
-    const allByRole = role => files.filter(f => f.role === role).map(f => ({ parsed: f.parsed, name: f.file.name }));
-    const pdfNames = files.filter(f => f.role === 'respaldo').map(f => f.file.name);
+    const ext = f => f.file.name.split('.').pop().toLowerCase();
+
+    const ofRole = role => files.filter(f => f.role === role);
+    const excelOf = role => ofRole(role).find(f => f.parsed?.sheets?.length)?.parsed ?? null;
+    const textOf = role => ofRole(role).find(f => f.parsed?.text !== undefined)?.parsed ?? null;
+    const namesOf = (role, exts) =>
+      ofRole(role).filter(f => exts.includes(ext(f))).map(f => f.file.name);
+
+    // Cotizaciones may arrive as Excel, Word, or a pile of PDFs — keep all three.
+    const cotEntries = ofRole('cotizaciones').map(f => ({
+      name: f.file.name,
+      ext: ext(f),
+      parsed: f.parsed,
+    }));
+
     return {
-      eett: byRole('eett'),
-      cubicaciones: byRole('cubicaciones'),
-      cotizaciones: byRole('cotizaciones'),
-      cotizacionesFiles: allByRole('cotizaciones'),
-      apu: byRole('apu'),
-      respaldoPdfNames: pdfNames,
+      eett: excelOf('eett') ?? textOf('eett'),
+      eettName: ofRole('eett')[0]?.file.name ?? null,
+
+      cubicaciones: excelOf('cubicaciones'),
+      cubicacionesName: ofRole('cubicaciones')[0]?.file.name ?? null,
+
+      cotizaciones: excelOf('cotizaciones'),
+      cotizacionesFiles: cotEntries,
+      cotizacionesPdfNames: namesOf('cotizaciones', ['pdf']),
+
+      apu: excelOf('apu'),
+
+      respaldoPdfNames: [
+        ...namesOf('respaldo', ['pdf']),
+        ...namesOf('cotizaciones', ['pdf']),
+      ],
+      imageCount: ofRole('imagen').length,
     };
   },
 

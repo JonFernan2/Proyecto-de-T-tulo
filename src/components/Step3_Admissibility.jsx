@@ -28,6 +28,7 @@ export default function Step3_Admissibility() {
   }
 
   const { passed, results } = admissibility;
+  const bajoUmbral = results.filter(r => r.cumpleUmbral === false);
 
   function exportRejectionPDF() {
     const { getFilesMap } = useGradingStore.getState();
@@ -60,9 +61,11 @@ export default function Step3_Admissibility() {
               {passed ? 'Entrega ADMISIBLE' : 'Entrega RECHAZADA'}
             </div>
             <div className="text-sm text-slate-600">
-              {passed
-                ? 'Todos los criterios de admisibilidad cumplen los umbrales mínimos.'
-                : 'Uno o más criterios no alcanzan el umbral mínimo. Nota: 1,0'}
+              {!passed
+                ? 'Falta uno o más archivos obligatorios.'
+                : bajoUmbral.length > 0
+                  ? `Archivos completos, pero ${bajoUmbral.map(r => r.label.split(' (')[0]).join(' y ')} está bajo la exigencia del 50%.`
+                  : 'Todos los criterios cumplen la exigencia mínima del 50%.'}
             </div>
           </div>
         </div>
@@ -77,8 +80,10 @@ export default function Step3_Admissibility() {
           >
             <div className="flex items-center justify-between mb-1">
               <div className="font-semibold text-slate-800 text-sm">{r.label}</div>
-              <span className={`text-sm font-bold ${r.passed ? 'text-green-600' : 'text-red-600'}`}>
-                {r.passed ? '✓ OK' : '✗ FALLA'}
+              <span className={`text-sm font-bold ${
+                !r.passed ? 'text-red-600' : r.cumpleUmbral === false ? 'text-amber-600' : 'text-green-600'
+              }`}>
+                {!r.passed ? '✗ FALTA' : r.cumpleUmbral === false ? '⚠ BAJO 50%' : '✓ OK'}
               </span>
             </div>
             <div className="text-sm text-slate-600">{r.detail}</div>
@@ -86,13 +91,15 @@ export default function Step3_Admissibility() {
             {/* Progress bar if ratio available */}
             {r.ratio !== undefined && (
               <div className="mt-2">
-                <div className="flex justify-between text-xs text-slate-500 mb-1">
-                  <span>{Math.round(r.ratio * 100)}% alcanzado</span>
-                  <span>mínimo {Math.round(r.threshold * 100)}%</span>
+                <div className="flex justify-between text-xs mb-1">
+                  <span className={r.cumpleUmbral === false ? 'text-red-600 font-semibold' : 'text-slate-500'}>
+                    {Math.round(r.ratio * 100)}% alcanzado
+                  </span>
+                  <span className="text-slate-500">mínimo {Math.round(r.threshold * 100)}%</span>
                 </div>
                 <div className="w-full bg-slate-200 rounded-full h-2">
                   <div
-                    className={`h-2 rounded-full ${r.passed ? 'bg-green-500' : 'bg-red-400'}`}
+                    className={`h-2 rounded-full ${r.cumpleUmbral === false ? 'bg-red-400' : 'bg-green-500'}`}
                     style={{ width: `${Math.min(100, r.ratio * 100)}%` }}
                   />
                 </div>
@@ -132,7 +139,7 @@ export default function Step3_Admissibility() {
           onClick={() => goTo('evaluating')}
           className="flex-1 py-2.5 rounded-lg font-semibold text-white bg-uvm-blue hover:bg-blue-800"
         >
-          Evaluar con IA →
+          Evaluar entrega →
         </button>
       </div>
     </div>

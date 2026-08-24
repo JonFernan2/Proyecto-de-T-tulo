@@ -1,114 +1,206 @@
 import { countListadoItems } from './fileParser.js';
 
+// Umbral mínimo exigido para cubicaciones y cotizaciones (pauta: 50%).
+export const UMBRAL_CUBICACIONES = 0.5;
+export const UMBRAL_COTIZACIONES = 0.5;
+
 /**
  * Run admissibility checks for E1 or E2.
- * Returns { passed: bool, results: CheckResult[] }
+ * Returns { passed, results, resumen }
  *
- * Cubicaciones and cotizaciones use cross-reference: count listado items (N)
- * and compare against sheet count in each Excel (1 sheet per activity).
+ * Cubicaciones and cotizaciones are cross-referenced against the listado:
+ * the listado is the baseline (N actividades), and each Excel is expected to
+ * carry roughly one sheet per activity.
  */
 export function runAdmissibility(delivery, filesMap) {
   const results = [];
 
-  // ── EETT ─────────────────────────────────────────────────────────────────────
-  const eettPresent = Boolean(filesMap.eett?.text?.trim());
-  results.push({
-    id: 'eett',
-    label: 'EETT (obligatorio)',
-    passed: eettPresent,
-    detail: eettPresent
-      ? `Presente. ${filesMap.eett.wordCount?.toLocaleString('es-CL') ?? '?'} palabras.`
-      : 'No se encontró archivo EETT.',
-  });
-
-  // ── Cross-reference baseline ──────────────────────────────────────────────────
-  // Count listado items (item# + unit + quantity) from cubicaciones Excel
+  // ── Cross-reference baseline ────────────────────────────────────────────────
   const nItems = countListadoItems(filesMap.cubicaciones);
 
-  // ── Cubicaciones ─────────────────────────────────────────────────────────────
-  const cubPresent = hasExcelContent(filesMap.cubicaciones);
-  if (cubPresent) {
-    const nSheets = filesMap.cubicaciones.sheets.length;
-    // All sheets count as cubicaciones (1 sheet per activity is the expected format)
-    const nCub = nSheets;
+  // ── EETT ────────────────────────────────────────────────────────────────────
+  results.push(checkEett(filesMap.eett));
 
-    if (nItems > 0) {
-      const ratio = Math.min(nCub, nItems) / nItems;
-      results.push({
-        id: 'cubicaciones',
-        label: 'Listado + Cubicaciones (obligatorio)',
-        passed: true,
-        detail: `${nCub} hoja(s) de cubicaciones · ${nItems} actividad(es) en el listado (${Math.round(ratio * 100)}% cubicado).`,
-        ratio,
-        threshold: 0.5,
-      });
-    } else {
-      results.push({
-        id: 'cubicaciones',
-        label: 'Listado + Cubicaciones (obligatorio)',
-        passed: true,
-        detail: `Presente. ${nSheets} hoja(s). Sin actividades con formato estándar (ítem + unidad + cantidad) detectadas en el listado.`,
-      });
-    }
-  } else {
-    results.push({
-      id: 'cubicaciones',
-      label: 'Listado + Cubicaciones (obligatorio)',
-      passed: false,
-      detail: 'No se encontró archivo de cubicaciones.',
-    });
-  }
+  // ── Cubicaciones ────────────────────────────────────────────────────────────
+  results.push(checkCubicaciones(filesMap.cubicaciones, nItems));
 
-  // ── Cotizaciones ─────────────────────────────────────────────────────────────
-  const cotFiles = filesMap.cotizacionesFiles ?? [];
-  const wordCotFiles = cotFiles.filter(f => f.parsed?.text !== undefined);
-  const excelCotFile = filesMap.cotizaciones?.sheets ? filesMap.cotizaciones : null;
+  // ── Cotizaciones ────────────────────────────────────────────────────────────
+  results.push(checkCotizaciones(filesMap, nItems));
 
-  let cotPassed, cotDetail, forceScore, cotRatio;
-
-  if (excelCotFile) {
-    const nCotSheets = excelCotFile.sheets.length;
-    cotPassed = true;
-    if (nItems > 0) {
-      cotRatio = Math.min(nCotSheets, nItems) / nItems;
-      cotDetail = `${nCotSheets} hoja(s) de cotizaciones · ${nItems} actividad(es) en el listado (${Math.round(cotRatio * 100)}% cotizado).`;
-    } else {
-      cotDetail = `Presente en Excel. ${nCotSheets} hoja(s).`;
-    }
-  } else if (wordCotFiles.length > 0) {
-    cotPassed = false;
-    forceScore = 1.0;
-    cotDetail = `Formato incorrecto: ${wordCotFiles.length} archivo(s) Word. La pauta exige Excel. Criterio se calificará con nota 1,0.`;
-  } else {
-    cotPassed = false;
-    forceScore = 1.0;
-    cotDetail = 'No se encontró archivo de cotizaciones. Criterio se calificará con nota 1,0.';
-  }
-
-  results.push({
-    id: 'cotizaciones',
-    label: 'Cotizaciones',
-    passed: cotPassed,
-    detail: cotDetail,
-    forceScore,
-    ...(cotRatio !== undefined ? { ratio: cotRatio, threshold: 0.8 } : {}),
-  });
-
-  // ── APU (solo E2) ────────────────────────────────────────────────────────────
+  // ── APU (solo E2) ───────────────────────────────────────────────────────────
   if (delivery === 'E2') {
     const apuPresent = hasExcelContent(filesMap.apu);
+    const nApu = filesMap.apu?.sheets?.length ?? 0;
+    const apuRatio = nItems > 0 ? Math.min(nApu, nItems) / nItems : undefined;
     results.push({
       id: 'apu',
       label: 'APU Cartillas (obligatorio)',
       passed: apuPresent,
       detail: apuPresent
-        ? `Presente. ${filesMap.apu.sheets?.length ?? '?'} hoja(s).`
+        ? (nItems > 0
+            ? `${nApu} cartilla(s) APU · ${nItems} actividad(es) en el listado (${pct(apuRatio)} con APU).`
+            : `Presente. ${nApu} cartilla(s).`)
         : 'No se encontró archivo APU.',
+      ...(apuRatio !== undefined ? { ratio: apuRatio, threshold: UMBRAL_CUBICACIONES } : {}),
     });
   }
 
   const passed = results.every(r => r.passed);
-  return { passed, results };
+  return { passed, results, resumen: buildResumen(results, nItems) };
+}
+
+// ─── EETT ─────────────────────────────────────────────────────────────────────
+function checkEett(eett) {
+  const present = Boolean(eett?.text?.trim());
+  if (!present) {
+    return {
+      id: 'eett',
+      label: 'EETT (obligatorio)',
+      passed: false,
+      detail: 'No se encontró archivo EETT.',
+    };
+  }
+
+  const words = eett.wordCount?.toLocaleString('es-CL') ?? '?';
+  const hl = eett.highlightCount ?? 0;
+  const st = eett.strikeCount ?? 0;
+  const parts = [`Presente (${eett.source === 'pdf' ? 'PDF' : 'Word'}). ${words} palabras.`];
+
+  if (eett.verifiable === false) {
+    // Flattened PDF: colours survive visually but the annotations are gone.
+    parts.push(
+      'El archivo no contiene anotaciones digitales, por lo que los resaltados y tachados ' +
+      'no son verificables automáticamente — deben revisarse a la vista.',
+    );
+  } else {
+    parts.push(
+      hl > 0
+        ? `${hl} fragmento(s) resaltado(s)${eett.highlightColors?.length ? ` (${eett.highlightColors.join(', ')})` : ''}.`
+        : 'No se encontraron marcas de resaltado en el documento.',
+    );
+    parts.push(
+      st > 0
+        ? `${st} fragmento(s) tachado(s).`
+        : 'No se encontraron marcas de tachado en el documento.',
+    );
+  }
+
+  return {
+    id: 'eett',
+    label: 'EETT (obligatorio)',
+    passed: true,
+    detail: parts.join(' '),
+    marcas: { highlightCount: hl, strikeCount: st, verifiable: eett.verifiable !== false },
+  };
+}
+
+// ─── Cubicaciones ─────────────────────────────────────────────────────────────
+function checkCubicaciones(cub, nItems) {
+  const base = { id: 'cubicaciones', label: 'Listado + Cubicaciones (obligatorio)' };
+
+  if (!hasExcelContent(cub)) {
+    return { ...base, passed: false, detail: 'No se encontró archivo de cubicaciones.' };
+  }
+
+  const nSheets = cub.sheets.length;
+  if (nItems <= 0) {
+    return {
+      ...base,
+      passed: true,
+      detail: `Presente. ${nSheets} hoja(s). No se pudo identificar el listado con formato estándar (ítem + unidad + cantidad) para calcular el porcentaje cubicado.`,
+    };
+  }
+
+  const ratio = Math.min(nSheets, nItems) / nItems;
+  const cumple = ratio >= UMBRAL_CUBICACIONES;
+  return {
+    ...base,
+    passed: true,
+    detail:
+      `${nSheets} hoja(s) de cubicaciones · ${nItems} actividad(es) en el listado ` +
+      `(${pct(ratio)} cubicado). Exigencia mínima ${pct(UMBRAL_CUBICACIONES)}: ` +
+      `${cumple ? 'CUMPLE' : 'NO CUMPLE'}.`,
+    ratio,
+    threshold: UMBRAL_CUBICACIONES,
+    cumpleUmbral: cumple,
+  };
+}
+
+// ─── Cotizaciones ─────────────────────────────────────────────────────────────
+function checkCotizaciones(filesMap, nItems) {
+  const base = { id: 'cotizaciones', label: 'Cotizaciones' };
+  const entries = filesMap.cotizacionesFiles ?? [];
+  const excel = filesMap.cotizaciones;                       // ya resuelto por el store
+  const pdfNames = filesMap.cotizacionesPdfNames ?? [];
+  const wordFiles = entries.filter(f => f.parsed?.text !== undefined && f.ext !== 'pdf');
+
+  // Nada entregado en ningún formato.
+  if (!excel && !pdfNames.length && !wordFiles.length) {
+    return {
+      ...base,
+      passed: false,
+      forceScore: 1.0,
+      detail: 'No se encontró archivo de cotizaciones en ningún formato. Criterio se calificará con nota 1,0.',
+    };
+  }
+
+  const notas = [];
+  let ratio;
+  let cumple;
+
+  if (excel) {
+    const nSheets = excel.sheets.length;
+    if (nItems > 0) {
+      ratio = Math.min(nSheets, nItems) / nItems;
+      cumple = ratio >= UMBRAL_COTIZACIONES;
+      notas.push(
+        `${nSheets} hoja(s) de cotizaciones · ${nItems} actividad(es) en el listado ` +
+        `(${pct(ratio)} cotizado). Exigencia mínima ${pct(UMBRAL_COTIZACIONES)}: ` +
+        `${cumple ? 'CUMPLE' : 'NO CUMPLE'}.`,
+      );
+    } else {
+      notas.push(`Excel de cotizaciones presente con ${nSheets} hoja(s).`);
+    }
+  } else if (wordFiles.length) {
+    notas.push(
+      `Entregado en Word (${wordFiles.length} archivo(s)) y no en Excel como exige la pauta. ` +
+      'Se evalúa el contenido, descontando por el formato.',
+    );
+  }
+
+  if (pdfNames.length) {
+    notas.push(`${pdfNames.length} PDF(s) de respaldo adjunto(s).`);
+  } else if (excel || wordFiles.length) {
+    notas.push('Sin PDFs de respaldo adjuntos.');
+  }
+
+  return {
+    ...base,
+    passed: true,
+    detail: notas.join(' '),
+    ...(ratio !== undefined ? { ratio, threshold: UMBRAL_COTIZACIONES, cumpleUmbral: cumple } : {}),
+    formatoCorrecto: Boolean(excel),
+    nPdfRespaldo: pdfNames.length,
+  };
+}
+
+// ─── Cuadro resumen ───────────────────────────────────────────────────────────
+function buildResumen(results, nItems) {
+  return {
+    nActividades: nItems,
+    filas: results.map(r => ({
+      id: r.id,
+      label: r.label,
+      estado: !r.passed ? 'NO CUMPLE' : r.cumpleUmbral === false ? 'BAJO EXIGENCIA' : 'OK',
+      porcentaje: r.ratio !== undefined ? pct(r.ratio) : '—',
+      exigencia: r.threshold !== undefined ? pct(r.threshold) : '—',
+      detalle: r.detail,
+    })),
+  };
+}
+
+function pct(r) {
+  return r === undefined ? '—' : `${Math.round(r * 100)}%`;
 }
 
 function hasExcelContent(data) {

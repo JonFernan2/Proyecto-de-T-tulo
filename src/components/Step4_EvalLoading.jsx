@@ -25,7 +25,8 @@ export default function Step4_EvalLoading() {
     async function run() {
       // ── Fase 1: Evaluación de texto ─────────────────────────────────────────
       setPhase(PHASES.text);
-      const evaluation = await evaluateWithClaude({ delivery, studentName, filesMap, images: [] });
+      const { admissibility } = useGradingStore.getState();
+      const evaluation = await evaluateWithClaude({ delivery, studentName, filesMap, admissibility });
 
       // ── Fase 2: Verificación fotográfica (si hay imágenes) ──────────────────
       if (images?.length > 0) {
@@ -60,7 +61,7 @@ export default function Step4_EvalLoading() {
       }
 
       // ── Aplicar ajustes de admisibilidad y pasar a resultados ───────────────
-      const { setAdjustment, setGlobalScore, admissibility } = useGradingStore.getState();
+      const { setAdjustment, setGlobalScore } = useGradingStore.getState();
 
       const forced = {};
       for (const r of admissibility?.results ?? []) {

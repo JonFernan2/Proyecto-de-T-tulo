@@ -31,10 +31,44 @@ const EVALUATE_TOOL = {
           required: ['id', 'score', 'justification'],
         },
       },
+      resumen: {
+        type: 'array',
+        description:
+          'Cuadro resumen de la revisión: entre 6 y 12 puntos concretos verificados. ' +
+          'Cada fila es un aspecto puntual de la pauta con el hallazgo real encontrado.',
+        items: {
+          type: 'object',
+          properties: {
+            aspecto: {
+              type: 'string',
+              description: 'Punto verificado, breve. Ej: "Resaltado de modificaciones en EETT".',
+            },
+            hallazgo: {
+              type: 'string',
+              description: 'Lo encontrado, con dato concreto (cantidad, partida o valor). Máx 2 líneas.',
+            },
+            estado: {
+              type: 'string',
+              enum: ['Cumple', 'Parcial', 'No cumple', 'No verificable'],
+            },
+          },
+          required: ['aspecto', 'hallazgo', 'estado'],
+        },
+      },
+      fortalezas: {
+        type: 'array',
+        description: '2 a 4 aspectos bien logrados, concretos.',
+        items: { type: 'string' },
+      },
+      mejoras: {
+        type: 'array',
+        description: '3 a 6 acciones concretas de mejora para la próxima entrega.',
+        items: { type: 'string' },
+      },
       globalScore: { type: 'number' },
       globalJustification: { type: 'string' },
     },
-    required: ['criteria', 'globalScore', 'globalJustification'],
+    required: ['criteria', 'resumen', 'fortalezas', 'mejoras', 'globalScore', 'globalJustification'],
   },
 };
 
@@ -134,6 +168,21 @@ function buildSystemPrompt(delivery) {
 
 Revisaste personalmente los archivos del estudiante. Escribe TODA la retroalimentación en primera persona, como si fueras Jonathan describiendo lo que encontraste al revisar. Ejemplos de tono correcto: "Al revisar las EETT encontré que...", "En el listado de actividades noté que...", "Verifiqué que las cubicaciones presentan...", "Al analizar las cotizaciones observé...". PROHIBIDO usar frases como "el sistema detecta", "la IA identifica", "se observa en el análisis", "el documento presenta".
 
+REGLA DE VERACIDAD (la más importante — no la incumplas):
+1. Los bloques "MARCAS DE FORMATO VERIFICADAS" y "HECHOS VERIFICADOS" contienen
+   conteos medidos directamente sobre los archivos. Son la verdad.
+   Si dicen que hay 312 fragmentos resaltados, el estudiante SÍ resaltó: está
+   PROHIBIDO escribir que no aplicó resaltados. Evalúa en cambio si son
+   suficientes y pertinentes respecto del volumen del documento.
+2. Si un archivo figura como presente en los hechos verificados, NUNCA escribas
+   que no fue entregado. Si no ves su contenido, di que no pudiste revisarlo en
+   detalle — no que falta.
+3. Cuando un dato se marca como "no verificable" (por ejemplo un PDF sin
+   anotaciones digitales), no afirmes ni que cumple ni que no cumple: indica que
+   ese punto quedó pendiente de revisión visual.
+4. No inventes partidas, valores ni proveedores. Cita solo lo que aparece en los
+   archivos. Si necesitas ejemplificar un error, copia el dato textual.
+
 VALIDACIÓN ARITMÉTICA DE CUBICACIONES (obligatorio):
 - Revisa cada fórmula de Excel entregada (columna "fórmula: ...")
 - Verifica si el resultado almacenado es coherente con la fórmula (ej: si fórmula dice =C5*D5 con valores 5 y 3, el resultado debe ser 15,0)
@@ -156,21 +205,37 @@ Evaluación cruzada que debes hacer:
 - Materiales en cubicaciones sin cotización correspondiente (identifica cuáles)
 - Inconsistencias de unidades entre listado, cubicaciones y cotizaciones
 
+EXIGENCIA DE COBERTURA (pauta vigente):
+Cubicaciones y cotizaciones exigen un mínimo del 50% de las actividades del
+listado. El porcentaje real viene calculado en los hechos verificados:
+- Cobertura ≥ 50% → el criterio se evalúa normalmente por su calidad
+- Cobertura < 50% → el criterio no puede superar nota 3,5, e indícalo explícitamente
+Los pesos de cada criterio se mantienen sin alteración.
+
 La nota es HOLÍSTICA (no promedio matemático): los porcentajes son guía de importancia relativa.
 
 ESCALA: 1,0 a 7,0 en pasos de 0,5. Nota mínima de aprobación: 4,0.
 
-Cada justificación: 4-6 oraciones en primera persona (Jonathan revisando), específica con ejemplos concretos encontrados (nombres de partidas, valores numéricos, nombres de hojas), en español formal chileno.`;
+Cada justificación: 4-6 oraciones en primera persona (Jonathan revisando), específica
+con ejemplos concretos encontrados (nombres de partidas, valores numéricos, nombres
+de hojas), en español formal chileno.
+
+Además del detalle por criterio debes completar:
+- resumen: cuadro de 6 a 12 filas con los puntos concretos que verificaste
+- fortalezas: 2 a 4 aspectos bien logrados
+- mejoras: 3 a 6 acciones concretas para la próxima entrega
+Todo escrito en primera persona, sin mencionar sistemas, herramientas ni IA.`;
 }
 
 function buildUserContent(delivery, studentName, payload) {
-  const { eett, cubicaciones, cotizaciones, cotizacionesFiles, apu, images, pdfNames } = payload;
+  const { eett, cubicaciones, cotizaciones, cotizacionesFiles, apu, pdfNames, admissibility } = payload;
 
   const contentBlocks = [];
 
   let text = `## CORRECCIÓN ${delivery} — Estudiante: ${studentName}\n\n`;
   text += getRubric(delivery);
   text += '\n\n---\n\n';
+  text += formatHechos(admissibility, { cubicaciones, cotizaciones, cotizacionesFiles, apu, pdfNames });
   text += `IMPORTANTE: Cada bloque <seccion> corresponde a un DOCUMENTO DISTINTO del estudiante.
 No mezcles información entre secciones. Al citar un dato, indica explícitamente de qué sección proviene.
 La sección LISTADO es la referencia base para la evaluación cruzada.\n\n`;
@@ -262,6 +327,50 @@ La sección LISTADO es la referencia base para la evaluación cruzada.\n\n`;
   return contentBlocks;
 }
 
+// ─── Hechos verificados (inventario medido, no interpretado) ──────────────────
+function formatHechos(admissibility, files) {
+  let out = 'HECHOS VERIFICADOS — inventario medido sobre los archivos entregados.\n';
+  out += 'Estos datos son exactos. Tu evaluación NO puede contradecirlos.\n\n';
+
+  const inv = [];
+  if (files.cubicaciones?.sheets?.length) {
+    inv.push(`- Excel de cubicaciones: ENTREGADO (${files.cubicaciones.sheets.length} hojas)`);
+  } else {
+    inv.push('- Excel de cubicaciones: NO ENTREGADO');
+  }
+
+  if (files.cotizaciones?.sheets?.length) {
+    inv.push(`- Excel de cotizaciones: ENTREGADO (${files.cotizaciones.sheets.length} hojas)`);
+  } else {
+    const wordCots = (files.cotizacionesFiles ?? []).filter(f => f.parsed?.text !== undefined);
+    inv.push(wordCots.length
+      ? `- Cotizaciones: ENTREGADAS en Word (${wordCots.length} archivos), no en Excel`
+      : '- Excel de cotizaciones: NO ENTREGADO');
+  }
+
+  const nPdf = files.pdfNames?.length ?? 0;
+  inv.push(nPdf > 0
+    ? `- PDFs de respaldo de cotizaciones: ${nPdf} archivo(s) ENTREGADOS — ${files.pdfNames.slice(0, 25).join(', ')}${nPdf > 25 ? ', …' : ''}`
+    : '- PDFs de respaldo de cotizaciones: ninguno adjunto');
+
+  if (files.apu?.sheets?.length) {
+    inv.push(`- Cartillas APU: ENTREGADAS (${files.apu.sheets.length} hojas)`);
+  }
+
+  out += inv.join('\n') + '\n\n';
+
+  if (admissibility?.results?.length) {
+    out += 'Verificación de admisibilidad (porcentajes ya calculados — úsalos tal cual):\n';
+    for (const r of admissibility.results) {
+      out += `- ${r.label}: ${r.detail}\n`;
+    }
+    out += '\n';
+  }
+
+  out += 'Si algo aparece aquí como ENTREGADO, no escribas que falta.\n\n---\n\n';
+  return out;
+}
+
 // ─── Separar listado del resto de cubicaciones ────────────────────────────────
 function splitListadoYCubicaciones(cubicacionesData) {
   if (!cubicacionesData?.sheets?.length) {
@@ -323,86 +432,176 @@ function splitListadoYCubicaciones(cubicacionesData) {
 // ─── Rubric text ──────────────────────────────────────────────────────────────
 function getRubric(delivery) {
   if (delivery === 'E1') {
-    return `## RÚBRICA ENTREGA 1
+    return `## RÚBRICA ENTREGA 1 — Guía de Desarrollo Proyecto de Título (UVM)
+
+EXIGENCIA MÍNIMA DE COBERTURA: 50% tanto en cubicaciones como en cotizaciones,
+medido contra el número de actividades del listado. Bajo ese 50% el criterio no
+puede superar nota 3,5. Los pesos de cada criterio NO cambian.
 
 ### 1. EETT — Especificaciones Técnicas (peso 25%, id: "eett")
-- Modificaciones correctamente destacadas en AMARILLO
-- Eliminaciones correctamente TACHADAS
-- Cada material con: calidad, materialidad, tipo, formato, color, modelo y marca/proveedor (no dejar ambigüedades)
-- Métodos constructivos convertidos a sugerencias, no imposiciones
-- Para edificación: solo AALL, APF, APC, ALC revisadas
+Según la pauta el estudiante debe:
+- Destacar en AMARILLO toda modificación o incorporación de información
+- TACHAR toda eliminación de información
+- Detallar cada material con: calidad, materialidad, tipo, formato, color, modelo
+  y marca/proveedor — "de modo que no quede nada a interpretación del licitante"
+- Convertir métodos constructivos, maquinarias, herramientas y equipos en
+  SUGERENCIAS al contratista, nunca imposiciones
+- En Edificación solo se revisan EETT de Arquitectura y Sanitarias (AALL, APF, APC, ALC)
+- Entregar en formato WORD
+Evalúa si las modificaciones resuelven ambigüedades reales del texto original
+(ej: "lana mineral tipo AislánGlass o técnicamente superior" debe pasar a
+especificar proveedor, espesor, formato y tipo concretos).
 
 ### 2. Listado de Actividades (peso 15%, id: "listado")
-- Numeración de ítem coincide exactamente con las EETT
-- Descripción resumida con características técnicas donde aplica (medidas, espesores)
-- Unidad de medida correcta: ml, m2, m3, kg, un, pm, gl según tipo de partida
-- Orden coherente con la secuencia de las EETT
+- ITEM: la numeración debe ser LA MISMA asignada en las EETT para esa actividad
+- DESCRIPCIÓN: resumida, con características donde corresponda (medidas,
+  espesores, dimensiones). Ej: "Radier H-25 (e=10cm)", "Porcelanato Budnik (45x20cm)"
+- UNIDAD correcta según el tipo de partida:
+  ml (guardapolvos, sellos, cercos) · m2 (revestimientos, cubiertas, pinturas)
+  m3 (hormigón, excavaciones, rellenos) · kg (perfiles, enfierradura)
+  un (puertas, artefactos sanitarios) · pm (madera en escuadría)
+  gl (permisos, aseo y entrega, limpieza permanente)
+- Formato Excel, orden coherente con la secuencia de las EETT
 
 ### 3. Cubicaciones (peso 35%, id: "cubicaciones")
-- Fórmulas EXPLÍCITAS y VISIBLES en Excel (no solo resultados numéricos)
-- Mínimo 2 decimales; NUNCA redondeado al entero superior
-- Materiales en UN expresados en enteros (nunca fraccionados)
-- Cada cálculo referenciado a su partida correspondiente
-- Coherencia entre fórmulas Excel y respaldo fotográfico/manual
-- Cumple NCh 353 y Manual de Cubicaciones MOP
+- Fórmulas EXPLÍCITAS y desarrolladas, indicando a qué partida hacen referencia
+- Al menos 2 decimales; NUNCA aproximar al entero superior
+  (la pauta ejemplifica: 37.859,57 kg jamás debe informarse como 37.860 kg)
+- Materiales medidos en UN siempre en enteros (no puede existir "4,8 unidades de WC")
+- La cubicación informa "cuánto exactamente necesito para construir";
+  las pérdidas y despuntes se agregan recién en el APU, no aquí
+- Todo cálculo debe estar respaldado (planilla, hoja de apuntes o escaneo legible)
+- En Edificación quedan EXCLUIDAS de evaluación: Instalaciones Eléctricas, CCDD,
+  CCTV, Clima, Ascensores y Redes de Gases. NO penalices su ausencia.
+- Sí deben analizarse en su totalidad: Sanitarias, Aguas Lluvias, Alcantarillado,
+  Pavimentación y Urbanización
+- En Obras Viales se analizan todas las partidas sin excepción
 
 ### 4. Cotizaciones (peso 25%, id: "cotizaciones")
-- 3 cotizaciones de 3 proveedores DISTINTOS para cada material
-- 1 cotización para herramientas, maquinarias y equipos (por separado)
-- Cotizaciones del año académico en curso (2026); rechazar años anteriores
-- Formato correcto: ítem | material | proveedor 01 | proveedor 02 | proveedor 03 | nombre archivo PDF
-- PDFs de respaldo presentes y correctamente nombrados`;
+- TRES cotizaciones de TRES proveedores distintos para cada material
+- UNA sola cotización para herramientas, maquinarias y equipos
+- Del año académico en curso; no tienen validez las de años anteriores
+- Excepciones legítimas que NO debes penalizar: material de proveedor exclusivo
+  (basta una cotización), material no distribuido en la región o en el país
+  (vale respaldo por email del proveedor)
+- Máquinas: debe informarse costo de arriendo/día o arriendo/hora
+- Formato Excel con columnas: ITEM | Material | Proveedor 01 | 02 | 03 | Nombre archivo
+- Tablas separadas para MATERIALES, HERRAMIENTAS, MÁQUINAS y EQUIPOS
+- Respaldo en PDF identificado con nombre del material e ítem de la partida;
+  si un PDF agrupa varios materiales se nombra "VARIOS" y se numera`;
   }
 
-  return `## RÚBRICA ENTREGA 2
+  return `## RÚBRICA ENTREGA 2 — Guía de Desarrollo Proyecto de Título (UVM)
+
+EXIGENCIA MÍNIMA DE COBERTURA: 50% de las actividades del listado deben contar
+con su cartilla APU. Los pesos de cada criterio NO cambian.
+Se registra todo en la Cartilla Excel del Anexo 01, UNA HOJA POR PARTIDA,
+siguiendo el orden del Listado de Actividades de la Entrega 1.
 
 ### 1. Métodos Constructivos (peso 30%, id: "metodos")
-- Descripción paso a paso detallada de cada actividad del itemizado
-- Cuadrilla básica completa: categoría (Maestro/Ayudante/Jornal) con especialidad para cada trabajador
-- Herramientas, equipos y maquinarias declarados coherentemente
-- Actividades previas y sucesoras identificadas
-- Criterio de fusión/división de actividades justificado
-- Nivel de detalle suficiente (equivalente a "Método Mejorado" del Documento Guía)
+- Un método por cada actividad del listado de la Entrega 1
+- Debe describir el PASO A PASO, especificando qué trabajador de la cuadrilla
+  hace cada acción y qué materiales, herramientas o equipos manipula
+- Debe indicar actividades PREVIAS y SUCESORAS (base para la Carta Gantt)
+- Debe justificarse la decisión de fusionar o dividir actividades
+- Nivel exigido: el "Método Mejorado" de los Ejemplos 6 y 7 de la pauta, que
+  nombra materiales concretos (terciado estructural 11mm, bastidores pino 2"x3",
+  clavos 2½"), herramientas por trabajador y la secuencia real de faena.
+  Un método que solo dice "el maestro coordinará y los ayudantes clavarán"
+  corresponde al "Método Deficiente" y debe calificarse como tal.
+- Partidas de igual materialidad (ej: VA-1, VA-2, VA-3) comparten método:
+  NO penalices que se repita, salvo que cambie la materialidad
 
 ### 2. APU — Mano de Obra (peso 25%, id: "mo")
-- Maestros y Ayudantes con especialidad especificada (carpintero, concretero, etc.)
-- Sueldos brutos diarios actualizados al mercado 2026 (sueldo mensual / 22 días)
-- Leyes sociales declaradas con porcentaje explícito
-- Cantidad de trabajadores consistente con el método constructivo
-- Rendimiento informado en UNIDAD/Día (Kg/día, M2/día, etc.)
+- Cuadrilla básica: el grupo mínimo suficiente para ejecutar la partida
+- Categorías MAESTRO, AYUDANTE y JORNAL; los dos primeros SIEMPRE con
+  especialidad informada (carpintero, concretero, enfierrador, gasfíter, pintor)
+- Nunca contabilizar supervisores, capataces ni jefes de terreno (van a Gastos Generales)
+- COSTO DÍA = sueldo bruto mensual de mercado / 22 días hábiles
+- Pesos chilenos SIN decimales, siempre redondeados hacia arriba
+  ($10.504,1 → $10.505 y también $10.504,9 → $10.505)
+- PARCIAL = Costo día / Rendimiento cuadrilla; TOTAL = Parcial × Cantidad
+- Leyes sociales con porcentaje explícito
+- Rendimiento SIEMPRE diario: Kg/día, M3/día, M2/día, Ml/día, Un/día
+- Duración = Cubicación / Rendimiento
 
 ### 3. APU — Materiales + Fletes (peso 30%, id: "materiales")
-- Designación completa de cada material necesario para la actividad
-- Porcentaje de pérdidas (%P) justificado (generalmente 2%–7%)
-- Precios coherentes con cotizaciones de E1
-- Flete: vehículo adecuado (camioneta/camión ¾/camión std/rampla), CantxViaje, valor viaje → valor/unidad
-- Fórmulas visibles en Excel (no solo resultados)
+- DESIGNACIÓN de cada material declarado en el método constructivo
+- %P de pérdidas normalmente entre 2% y 7% (cortes, despuntes, manipulación,
+  transporte, almacenamiento). No confundir pérdidas con robos.
+- CANTIDAD (K): cuántas unidades se necesitan para materializar UNA unidad
+  de la partida (1 m3, 1 m2, 1 kg, 1 ml)
+- VALOR: el precio cotizado en la Entrega 1 — verifica la coherencia
+- FLETES: todo material debe fletearse salvo que la cotización ya incluya
+  transporte. Supuesto académico de 20 km con esta tabla:
+    Camioneta Pick Up — 1,5 m3 — 1.000 kg — $15.000
+    Camión ¾         — 28 m3  — 2.500 kg — $30.000
+    Camión Standard  — 48 m3  — 5.000 kg — $50.000
+    Camión Rampla    — 85 m3  — 30.000 kg — $100.000
+  Valor unid = Valor viaje / CantxViaje; Total parcial FLE = K × Valor unid
+  Verifica que el vehículo elegido sea coherente con el volumen y peso del material
+- Fórmulas visibles en Excel, no solo resultados
 
 ### 4. APU — Equipos y Maquinarias (peso 15%, id: "equipos")
-- Distinción correcta entre arrendado y propiedad de empresa
-- Equipos precio < $300.000 → propiedad, desgaste 0,02% de valor comercial por unidad producida
-- Equipos arrendados → valor = (precio arriendo) / rendimiento en condiciones reales de obra
-- Herramientas: solo listadas, no valorizadas (salvo que sean específicas de una partida)
-- Coherencia entre equipos declarados y método constructivo`;
+- Si el equipo tiene precio de venta INFERIOR a $300.000 se supone que la empresa
+  lo adquiere: pasa a ser activo y solo se informa su DESGASTE, definido
+  académicamente en 0,02% del valor comercial por unidad producida
+  (ej: betonera de $275.000 → 275.000 × 0,02 / 100 = $55 por m3)
+- Si es ARRENDADO: valor = precio de arriendo / rendimiento en condiciones
+  REALES de obra, nunca ideales
+  (ej: cargador frontal a $20.000/día con rendimiento 90 m3/día → $223/m3)
+- Total parcial: arrendado = H×I ; propiedad de la empresa = H×I×K
+- HERRAMIENTAS: solo se identifican, NO se valorizan, porque participan en más
+  de una partida. Excepción: si la herramienta es específica de esa partida o no
+  puede reutilizarse, debe valorizarse dentro de MATERIALES.
+- Coherencia entre los equipos declarados aquí y el método constructivo`;
 }
 
 // ─── Formatters ───────────────────────────────────────────────────────────────
 function formatEett(eett) {
-  if (!eett?.text) return '\n### EETT\n_(No entregado)_\n';
-  const flags = [];
-  if (eett.hasHighlights) flags.push('contiene texto resaltado en amarillo');
-  if (eett.hasStrikethrough) flags.push('contiene texto tachado');
-  if (!eett.hasHighlights) flags.push('⚠ NO se detectaron resaltados en amarillo');
-  if (!eett.hasStrikethrough) flags.push('⚠ NO se detectaron tachados');
+  if (!eett?.text) return '_(No entregado)_\n';
 
-  const snippet = eett.text.length > 30000 ? eett.text.slice(0, 30000) + '\n[... TRUNCADO ...]' : eett.text;
-  return `\n### EETT — Especificaciones Técnicas
-Indicadores de formato: ${flags.join('; ')}
-Palabras totales: ${eett.wordCount ?? 'N/D'}
+  let out = '';
 
-\`\`\`
-${snippet}
-\`\`\`\n`;
+  // Los conteos vienen de leer el XML del .docx (o las anotaciones del PDF).
+  // Son HECHOS MEDIDOS: la evaluación debe basarse en ellos, no en suposiciones.
+  if (eett.highlightCount !== undefined) {
+    const hl = eett.highlightCount ?? 0;
+    const st = eett.strikeCount ?? 0;
+
+    out += `MARCAS DE FORMATO VERIFICADAS (conteo directo sobre el archivo):\n`;
+
+    if (eett.verifiable === false) {
+      out += `- El archivo es un PDF sin anotaciones digitales (probablemente exportado desde Word).\n`;
+      out += `- Los resaltados y tachados NO son verificables automáticamente en este formato.\n`;
+      out += `- NO afirmes que faltan resaltados o tachados: no hay evidencia en ningún sentido.\n`;
+      out += `  Indica que ese punto debe revisarse visualmente sobre el documento.\n`;
+    } else {
+      out += `- Fragmentos RESALTADOS: ${hl}${eett.highlightColors?.length ? ` (colores: ${eett.highlightColors.join(', ')})` : ''}\n`;
+      out += `- Fragmentos TACHADOS: ${st}\n`;
+      out += `- Estos números son exactos. Si son mayores que cero, el estudiante SÍ marcó el documento;\n`;
+      out += `  no afirmes lo contrario. Evalúa entonces si las marcas son suficientes y pertinentes\n`;
+      out += `  respecto del volumen del documento (${eett.wordCount ?? '?'} palabras).\n`;
+
+      if (eett.highlightSamples?.length) {
+        out += `\nEjemplos de texto resaltado:\n`;
+        eett.highlightSamples.forEach(s => { out += `  · "${s}"\n`; });
+      }
+      if (eett.strikeSamples?.length) {
+        out += `\nEjemplos de texto tachado:\n`;
+        eett.strikeSamples.forEach(s => { out += `  · "${s}"\n`; });
+      }
+    }
+    out += '\n';
+  }
+
+  out += `Palabras totales: ${eett.wordCount ?? 'N/D'}\n\nCONTENIDO:\n`;
+  const snippet = eett.text.length > 30000
+    ? eett.text.slice(0, 30000) + '\n[... TRUNCADO ...]'
+    : eett.text;
+  out += `\`\`\`\n${snippet}\n\`\`\`\n`;
+
+  return out;
 }
 
 function formatExcel(label, data) {

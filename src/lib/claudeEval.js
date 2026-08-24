@@ -4,26 +4,38 @@ const BATCH_SIZE = 15;
  * Calls the local Express server to evaluate a delivery with Claude.
  * Images are handled separately via verifyImages().
  */
-export async function evaluateWithClaude({ delivery, studentName, filesMap, images }) {
+export async function evaluateWithClaude({ delivery, studentName, filesMap, admissibility }) {
+  const e = filesMap.eett;
   const payload = {
-    eett: filesMap.eett
+    eett: e
       ? {
-          text: filesMap.eett.text,
-          hasHighlights: filesMap.eett.hasHighlights,
-          hasStrikethrough: filesMap.eett.hasStrikethrough,
-          wordCount: filesMap.eett.wordCount,
+          text: e.text,
+          wordCount: e.wordCount,
+          source: e.source,
+          verifiable: e.verifiable,
+          hasHighlights: e.hasHighlights,
+          hasStrikethrough: e.hasStrikethrough,
+          highlightCount: e.highlightCount,
+          strikeCount: e.strikeCount,
+          highlightSamples: e.highlightSamples,
+          strikeSamples: e.strikeSamples,
+          highlightColors: e.highlightColors,
         }
       : null,
     cubicaciones: filesMap.cubicaciones ?? null,
     cotizaciones: filesMap.cotizaciones ?? null,
     cotizacionesFiles: (filesMap.cotizacionesFiles ?? []).map(f => ({
       name: f.name,
+      ext: f.ext,
       parsed: f.parsed?.text !== undefined
-        ? { text: f.parsed.text, hasHighlights: f.parsed.hasHighlights, hasStrikethrough: f.parsed.hasStrikethrough, wordCount: f.parsed.wordCount }
+        ? { text: f.parsed.text, wordCount: f.parsed.wordCount }
         : f.parsed,
     })),
     apu: filesMap.apu ?? null,
     pdfNames: filesMap.respaldoPdfNames ?? [],
+    admissibility: admissibility
+      ? { results: admissibility.results.map(r => ({ label: r.label, detail: r.detail })) }
+      : null,
   };
 
   const res = await fetch('/api/evaluate', {
