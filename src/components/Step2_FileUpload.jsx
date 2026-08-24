@@ -172,21 +172,16 @@ export default function Step2_FileUpload() {
                 <span className="text-xs text-green-500">✓ Leído</span>
               )}
 
-              {/* Role selector (Excel and Word) */}
-              {/\.(xlsx?|docx?)$/i.test(entry.file.name) && (
-                <select
-                  value={entry.role}
-                  onChange={e => updateFileRole(entry.id, e.target.value)}
-                  className="text-xs border border-slate-300 rounded px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-uvm-blue"
-                >
-                  {(/\.docx?$/i.test(entry.file.name)
-                    ? roleOptions.filter(r => ['eett', 'cotizaciones'].includes(r.value))
-                    : roleOptions.filter(r => !['respaldo', 'imagen', 'eett'].includes(r.value))
-                  ).map(r => (
-                    <option key={r.value} value={r.value}>{r.label}</option>
-                  ))}
-                </select>
-              )}
+              {/* Role selector — all files */}
+              <select
+                value={entry.role}
+                onChange={e => updateFileRole(entry.id, e.target.value)}
+                className="text-xs border border-slate-300 rounded px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-uvm-blue"
+              >
+                {roleOptions.map(r => (
+                  <option key={r.value} value={r.value}>{r.label}</option>
+                ))}
+              </select>
 
               <button
                 onClick={() => removeFile(entry.id)}
