@@ -106,20 +106,45 @@ export function detectStudentName(filename) {
 
 /**
  * Count distinct listado items across an Excel file.
- * An item row is: col A matches item# pattern (e.g. "1", "1.1", "2.3.1")
- *   AND the row contains a unit keyword AND a positive quantity.
- * Uses a Set so the same item# is counted once even if repeated across sheets.
+ * Strategy:
+ *  1. Look for a dedicated listado/itemizado sheet → count unit-bearing rows there.
+ *  2. Fallback: search all sheets for rows with item# pattern + unit + quantity.
  */
 export function countListadoItems(excelData) {
   if (!excelData?.sheets?.length) return 0;
-  const UNIT_RE = /\b(m2|m²|ml|m3|m³|kg|un\.?|und\.?|unid\.?|gl\.?|glb\.?|pm|hr|h|lts?|ton|jgo|m\b)/i;
-  const seen = new Set();
+  const UNIT_RE = /\b(m2|m²|ml|m3|m³|kg|un\.?|und\.?|unid\.?|gl\.?|glb\.?|pm|hr|h|lts?|ton|jgo|pza|pzas|vj|set|m\b)/i;
+  const HEADER_RE = /^(item|ítem|n[°º]|nro|partida|descripci[oó]n|unidad|cantidad|total)/i;
 
+  // 1. Dedicated listado sheet
+  const listadoSheet = excelData.sheets.find(s =>
+    /listado|itemizado|actividades?|partidas?/i.test(s.name)
+  );
+
+  if (listadoSheet) {
+    let count = 0;
+    for (const row of listadoSheet.rows) {
+      if (!row || row.length < 2) continue;
+      const firstCell = String(row[0]?.value ?? '').trim();
+      if (!firstCell || HEADER_RE.test(firstCell)) continue;
+      const rowText = row.map(c => String(c?.value ?? '')).join(' ');
+      if (!UNIT_RE.test(rowText)) continue;
+      const hasQty = row.some(c => {
+        if (!c) return false;
+        const v = parseFloat(String(c.value).replace(',', '.'));
+        return !isNaN(v) && v > 0;
+      });
+      if (hasQty) count++;
+    }
+    if (count > 0) return count;
+  }
+
+  // 2. Fallback: item# pattern across all sheets (deduplicated)
+  const seen = new Set();
   for (const sheet of excelData.sheets) {
     for (const row of sheet.rows) {
       if (!row[0]) continue;
       const firstCell = String(row[0].value ?? '').trim();
-      if (!/^\d{1,2}(\.\d{1,2}){0,2}$/.test(firstCell)) continue;
+      if (!/^\d{1,3}(\.\d{1,3}){0,3}$/.test(firstCell)) continue;
       const rowText = row.map(c => String(c?.value ?? '')).join(' ');
       if (!UNIT_RE.test(rowText)) continue;
       const hasQty = row.some(c => {
