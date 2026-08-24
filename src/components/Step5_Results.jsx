@@ -36,6 +36,21 @@ export default function Step5_Results() {
   const finalGlobal = globalScore ?? aiGlobal;
   const globalIdx = GRADE_STEPS.indexOf(finalGlobal);
 
+  // Recalculate weighted global score when a criterion score changes
+  function handleScoreChange(id, score) {
+    setAdjustment(id, 'score', score);
+    const updated = rubricCriteria.map(rc => {
+      const adj = useGradingStore.getState().adjustments[rc.id] ?? {};
+      const aiCrit = evaluation.criteria?.find(c => c.id === rc.id) ?? {};
+      const s = rc.id === id ? score : (adj.score ?? aiCrit.score ?? 1.0);
+      return { weight: rc.weight, s };
+    });
+    const totalWeight = updated.reduce((sum, c) => sum + c.weight, 0);
+    const weighted = updated.reduce((sum, c) => sum + c.s * c.weight, 0) / (totalWeight || 1);
+    const snapped = Math.max(1.0, Math.min(7.0, Math.round(weighted * 2) / 2));
+    setGlobalScore(snapped);
+  }
+
   function handleExport() {
     generateFeedbackPDF({
       delivery,
@@ -59,18 +74,18 @@ export default function Step5_Results() {
           </p>
         </div>
         <div className="text-center">
-          <div className="text-xs text-slate-500 mb-0.5">Nota IA global</div>
+          <div className="text-xs text-slate-500 mb-0.5">Nota propuesta</div>
           <div className={`text-3xl font-bold ${GRADE_COLORS.getColor(aiGlobal)}`}>
             {aiGlobal.toFixed(1).replace('.', ',')}
           </div>
         </div>
       </div>
 
-      {/* Global justification from AI */}
+      {/* Global justification */}
       {evaluation.globalJustification && (
         <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
           <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
-            Justificación global (IA)
+            Justificación global
           </div>
           <p className="text-sm text-slate-700 leading-relaxed">{evaluation.globalJustification}</p>
         </div>
@@ -86,7 +101,7 @@ export default function Step5_Results() {
             aiJustification={c.aiJustification}
             professorScore={c.professorScore}
             professorObservation={c.professorObservation}
-            onScoreChange={score => setAdjustment(c.id, 'score', score)}
+            onScoreChange={score => handleScoreChange(c.id, score)}
             onObsChange={obs => setAdjustment(c.id, 'observation', obs)}
           />
         ))}
@@ -98,7 +113,7 @@ export default function Step5_Results() {
           <div>
             <div className="text-sm font-medium text-blue-200">Nota final del docente</div>
             <div className="text-xs text-blue-300 mt-0.5">
-              Propuesta IA: {aiGlobal.toFixed(1).replace('.', ',')} · Ajusta si lo consideras necesario
+              Ajusta si lo consideras necesario
             </div>
           </div>
           <div className={`text-4xl font-bold ${finalGlobal >= 4 ? 'text-green-300' : 'text-red-300'}`}>

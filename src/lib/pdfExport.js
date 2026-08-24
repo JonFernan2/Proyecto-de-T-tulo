@@ -104,14 +104,13 @@ export function generateFeedbackPDF({ delivery, studentName, admissibility, crit
   const criteriaRows = criteria.map(c => [
     c.label,
     `${Math.round(c.weight * 100)}%`,
-    String(c.aiScore.toFixed(1)).replace('.', ','),
     String(c.professorScore.toFixed(1)).replace('.', ','),
-    c.aiJustification,
+    c.professorObservation?.trim() || c.aiJustification,
   ]);
 
   autoTable(doc, {
     startY: y,
-    head: [['Criterio', 'Peso', 'Nota IA', 'Nota Final', 'Justificación (IA)']],
+    head: [['Criterio', 'Peso', 'Nota', 'Justificación']],
     body: criteriaRows,
     theme: 'striped',
     headStyles: { fillColor: BLUE, textColor: WHITE, fontSize: 8, fontStyle: 'bold' },
@@ -120,11 +119,10 @@ export function generateFeedbackPDF({ delivery, studentName, admissibility, crit
       0: { cellWidth: 38, fontStyle: 'bold' },
       1: { cellWidth: 12, halign: 'center' },
       2: { cellWidth: 16, halign: 'center' },
-      3: { cellWidth: 16, halign: 'center' },
-      4: { cellWidth: 'auto' },
+      3: { cellWidth: 'auto' },
     },
     didParseCell(data) {
-      if (data.section === 'body' && (data.column.index === 2 || data.column.index === 3)) {
+      if (data.section === 'body' && data.column.index === 2) {
         const score = parseFloat(String(data.cell.text[0]).replace(',', '.'));
         if (!isNaN(score)) {
           data.cell.styles.textColor = gradeColor(score);
@@ -138,40 +136,25 @@ export function generateFeedbackPDF({ delivery, studentName, admissibility, crit
   y = doc.lastAutoTable.finalY + 6;
 
   // ── Global score box ─────────────────────────────────────────────────────────
-  const boxH = 22;
-  doc.setFillColor(...LIGHT_GRAY);
+  const boxH = 18;
+  doc.setFillColor(...BLUE);
   doc.rect(14, y, W - 28, boxH, 'F');
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(9);
-  doc.setTextColor(...DARK_GRAY);
-  doc.text('Nota Propuesta IA:', 18, y + 6);
+  doc.setTextColor(...WHITE);
+  doc.text('Nota Final del Docente:', 18, y + 7);
 
-  doc.setFontSize(16);
-  doc.setTextColor(...gradeColor(globalScore));
-  doc.text(globalScore.toFixed(1).replace('.', ','), 60, y + 8);
+  doc.setFontSize(20);
+  doc.setTextColor(globalScore >= 4.0 ? 144 : 252, globalScore >= 4.0 ? 238 : 165, globalScore >= 4.0 ? 144 : 165);
+  doc.text(globalScore.toFixed(1).replace('.', ','), 18, y + 15);
 
-  doc.setFontSize(9);
-  doc.setTextColor(...DARK_GRAY);
-  doc.text('Nota Final del Docente:', 18, y + 14);
-
-  doc.setFontSize(16);
-  const finalScore = criteria.length > 0
-    ? criteria.reduce((acc, c) => acc + c.professorScore, 0) / criteria.length
-    : globalScore;
-  const displayFinal = criteria.find(c => c.professorScore !== c.aiScore) ? criteria[0]?.finalOverride ?? globalScore : globalScore;
-
-  // Use the globalScore as the professor's final (it's set by the store)
-  const professorFinal = criteria.professorFinal ?? globalScore;
-  doc.setTextColor(...gradeColor(globalScore));
-  doc.text(globalScore.toFixed(1).replace('.', ','), 75, y + 16);
-
-  // Global justification
+  // Global justification on the right
   doc.setFontSize(8);
-  doc.setTextColor(...DARK_GRAY);
+  doc.setTextColor(...WHITE);
   doc.setFont('helvetica', 'normal');
-  const justLines = doc.splitTextToSize(globalJustification ?? '', W - 28 - 95);
-  doc.text(justLines, 100, y + 5);
+  const justLines = doc.splitTextToSize(globalJustification ?? '', W - 28 - 55);
+  doc.text(justLines, 60, y + 6);
 
   y += boxH + 6;
 
