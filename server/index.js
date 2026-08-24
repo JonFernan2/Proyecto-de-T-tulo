@@ -12,36 +12,70 @@ const MODEL = 'claude-sonnet-4-6';
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
+// ─── Tool schemas ─────────────────────────────────────────────────────────────
+const EVALUATE_TOOL = {
+  name: 'submit_evaluation',
+  description: 'Envía la evaluación completa de la entrega del estudiante.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      criteria: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            score: { type: 'number' },
+            justification: { type: 'string' },
+          },
+          required: ['id', 'score', 'justification'],
+        },
+      },
+      globalScore: { type: 'number' },
+      globalJustification: { type: 'string' },
+    },
+    required: ['criteria', 'globalScore', 'globalJustification'],
+  },
+};
+
+const IMAGE_TOOL = {
+  name: 'submit_image_findings',
+  description: 'Envía los hallazgos de la revisión del respaldo fotográfico.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      findings: { type: 'string' },
+      hasErrors: { type: 'boolean' },
+      errorCount: { type: 'integer' },
+    },
+    required: ['findings', 'hasErrors', 'errorCount'],
+  },
+};
+
 // ─── Image verification endpoint ─────────────────────────────────────────────
 app.post('/api/verify-images', async (req, res) => {
   try {
     const { studentName, cubicacionesContext, images, batchIndex, totalBatches } = req.body;
 
-    const contentBlocks = [];
+    const contentBlocks = [
+      {
+        type: 'text',
+        text: `Eres el docente Jonathan Fernando Muñoz Alvarez revisando el respaldo fotográfico de cubicaciones del estudiante ${studentName}.
 
-    contentBlocks.push({
-      type: 'text',
-      text: `Eres el docente Jonathan Fernando Muñoz Alvarez revisando el respaldo fotográfico de cubicaciones del estudiante ${studentName}.
-
-Tu tarea es comparar las imágenes adjuntas (tanda ${batchIndex + 1} de ${totalBatches}) contra las fórmulas y resultados del Excel de cubicaciones.
+Compara las imágenes adjuntas (tanda ${batchIndex + 1} de ${totalBatches}) contra las fórmulas y resultados del Excel de cubicaciones.
 
 CONTEXTO DEL EXCEL DE CUBICACIONES:
 ${cubicacionesContext}
 
-Para cada imagen analizada indica:
-1. Qué partida o actividad representa (si es legible)
-2. Si los números y cálculos manuales de la imagen son coherentes con las fórmulas del Excel
-3. Si encuentras errores aritméticos, diferencias o inconsistencias — señálalos con el valor correcto
-4. Si la imagen es ilegible o no corresponde a cálculos de cubicaciones, indícalo brevemente
+Por cada imagen analizada indica:
+- Qué partida/actividad representa (si es legible)
+- Si los cálculos manuales son coherentes con las fórmulas del Excel
+- Errores aritméticos o inconsistencias con valor concreto
+- Si la imagen es ilegible, indícalo brevemente
 
-Escribe en primera persona como Jonathan revisando. Sé específico con los números.
-RESPONDE con un objeto JSON:
-{
-  "findings": "texto con todos los hallazgos de esta tanda",
-  "hasErrors": true/false,
-  "errorCount": N
-}`,
-    });
+Escribe en primera persona como Jonathan revisando. Sé específico con los números.`,
+      },
+    ];
 
     images.forEach(({ data, mediaType }) => {
       contentBlocks.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data } });
@@ -50,15 +84,15 @@ RESPONDE con un objeto JSON:
     const message = await anthropic.messages.create({
       model: MODEL,
       max_tokens: 2048,
+      tools: [IMAGE_TOOL],
+      tool_choice: { type: 'tool', name: 'submit_image_findings' },
       messages: [{ role: 'user', content: contentBlocks }],
     });
 
-    const rawText = message.content.find(b => b.type === 'text')?.text ?? '';
-    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('La IA no devolvió JSON válido en verificación de imágenes.');
+    const toolUse = message.content.find(b => b.type === 'tool_use');
+    if (!toolUse) throw new Error('La IA no devolvió hallazgos de imágenes.');
 
-    const result = JSON.parse(jsonMatch[0]);
-    res.json({ ok: true, result });
+    res.json({ ok: true, result: toolUse.input });
   } catch (err) {
     console.error('[verify-images] ERROR:', err.message);
     res.status(500).json({ ok: false, error: err.message });
@@ -77,17 +111,15 @@ app.post('/api/evaluate', async (req, res) => {
       model: MODEL,
       max_tokens: 4096,
       system: systemPrompt,
+      tools: [EVALUATE_TOOL],
+      tool_choice: { type: 'tool', name: 'submit_evaluation' },
       messages: [{ role: 'user', content: userContent }],
     });
 
-    const rawText = message.content.find(b => b.type === 'text')?.text ?? '';
+    const toolUse = message.content.find(b => b.type === 'tool_use');
+    if (!toolUse) throw new Error('La IA no devolvió una evaluación válida.');
 
-    // Extract JSON robustly (might be wrapped in ```json ... ```)
-    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error('La IA no devolvió JSON válido.');
-
-    const evaluation = JSON.parse(jsonMatch[0]);
-    res.json({ ok: true, evaluation });
+    res.json({ ok: true, evaluation: toolUse.input });
   } catch (err) {
     console.error('[evaluate] ERROR:', err.message);
     console.error('[evaluate] status:', err.status);
@@ -128,16 +160,7 @@ La nota es HOLÍSTICA (no promedio matemático): los porcentajes son guía de im
 
 ESCALA: 1,0 a 7,0 en pasos de 0,5. Nota mínima de aprobación: 4,0.
 
-RESPONDE ÚNICAMENTE con un objeto JSON válido, sin texto antes ni después:
-{
-  "criteria": [
-    { "id": "...", "score": X.X, "justification": "..." }
-  ],
-  "globalScore": X.X,
-  "globalJustification": "..."
-}
-
-Cada justificación: 4-6 oraciones en primera persona (Jonathan revisando), específica con ejemplos concretos encontrados, en español formal chileno.`;
+Cada justificación: 4-6 oraciones en primera persona (Jonathan revisando), específica con ejemplos concretos encontrados (nombres de partidas, valores numéricos, nombres de hojas), en español formal chileno.`;
 }
 
 function buildUserContent(delivery, studentName, payload) {
