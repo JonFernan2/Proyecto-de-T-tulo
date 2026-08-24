@@ -36,7 +36,9 @@ app.post('/api/evaluate', async (req, res) => {
     const evaluation = JSON.parse(jsonMatch[0]);
     res.json({ ok: true, evaluation });
   } catch (err) {
-    console.error('[evaluate]', err.message);
+    console.error('[evaluate] ERROR:', err.message);
+    console.error('[evaluate] status:', err.status);
+    console.error('[evaluate] cause:', err.cause?.message ?? err.cause ?? '(sin causa)');
     res.status(500).json({ ok: false, error: err.message });
   }
 });
