@@ -2,10 +2,10 @@ import React, { useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { useGradingStore } from '../store/useGradingStore.js';
 import { DELIVERIES } from '../lib/rubric.js';
-import { parseExcel, parseWord, parseImage, detectStudentName } from '../lib/fileParser.js';
+import { parseExcel, parseWord, parsePdf, parseImage, detectStudentName } from '../lib/fileParser.js';
 
 const ROLE_OPTIONS_E1 = [
-  { value: 'eett', label: 'EETT (Word)' },
+  { value: 'eett', label: 'EETT (Word / PDF)' },
   { value: 'cubicaciones', label: 'Listado + Cubicaciones' },
   { value: 'cotizaciones', label: 'Cotizaciones' },
   { value: 'respaldo', label: 'Respaldo PDF (cotizaciones)' },
@@ -13,7 +13,7 @@ const ROLE_OPTIONS_E1 = [
 ];
 
 const ROLE_OPTIONS_E2 = [
-  { value: 'eett', label: 'EETT (Word)' },
+  { value: 'eett', label: 'EETT (Word / PDF)' },
   { value: 'cubicaciones', label: 'Listado + Cubicaciones E1' },
   { value: 'cotizaciones', label: 'Cotizaciones E1' },
   { value: 'apu', label: 'APU — Cartillas (Anexo 01)' },
@@ -27,7 +27,10 @@ function guessRole(file, delivery) {
     if (/cotiz|cot_|proveedor|presupuesto/.test(name)) return 'cotizaciones';
     return 'eett';
   }
-  if (ext === 'pdf') return 'respaldo';
+  if (ext === 'pdf') {
+    if (/eett|especificaci|et_|_et_|tecnica/.test(name)) return 'eett';
+    return 'respaldo';
+  }
   if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) return 'imagen';
   if (ext === 'xlsx' || ext === 'xls') {
     if (/apu|analisis|precios|unitarios|cartilla/.test(name)) return 'apu';
@@ -65,8 +68,10 @@ export default function Step2_FileUpload() {
         parsed = await parseExcel(file);
       } else if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) {
         parsed = await parseImage(file);
+      } else if (ext === 'pdf' && role === 'eett') {
+        parsed = await parsePdf(file);
       }
-      // PDFs: just store name, no parsing
+      // Other PDFs (respaldo): just store name, no parsing
       setParsed(id, parsed);
     } catch (err) {
       console.error(`Error parsing ${file.name}:`, err);
@@ -175,7 +180,14 @@ export default function Step2_FileUpload() {
               {/* Role selector — all files */}
               <select
                 value={entry.role}
-                onChange={e => updateFileRole(entry.id, e.target.value)}
+                onChange={e => {
+                  const newRole = e.target.value;
+                  updateFileRole(entry.id, newRole);
+                  const ext = entry.file.name.split('.').pop().toLowerCase();
+                  if (ext === 'pdf' && newRole === 'eett' && !entry.parsed) {
+                    parseFile(entry.id, entry.file, newRole);
+                  }
+                }}
                 className="text-xs border border-slate-300 rounded px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-uvm-blue"
               >
                 {roleOptions.map(r => (

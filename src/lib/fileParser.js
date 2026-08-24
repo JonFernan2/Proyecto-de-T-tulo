@@ -1,5 +1,11 @@
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
+import * as pdfjsLib from 'pdfjs-dist';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
+).href;
 
 // ─── Excel ────────────────────────────────────────────────────────────────────
 export async function parseExcel(file) {
@@ -66,6 +72,31 @@ export async function parseWord(file) {
   const wordCount = text.trim().split(/\s+/).length;
 
   return { text, html, hasHighlights, hasStrikethrough, wordCount };
+}
+
+// ─── PDF (EETT) ───────────────────────────────────────────────────────────────
+export async function parsePdf(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+  let fullText = '';
+  let hasHighlights = false;
+  let hasStrikethrough = false;
+
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+
+    const textContent = await page.getTextContent();
+    const pageText = textContent.items.map(item => item.str).join(' ');
+    fullText += pageText + '\n';
+
+    const annotations = await page.getAnnotations();
+    if (annotations.some(a => a.subtype === 'Highlight')) hasHighlights = true;
+    if (annotations.some(a => a.subtype === 'StrikeOut')) hasStrikethrough = true;
+  }
+
+  const wordCount = fullText.trim().split(/\s+/).filter(Boolean).length;
+  return { text: fullText, wordCount, hasHighlights, hasStrikethrough };
 }
 
 // ─── Image → base64 ───────────────────────────────────────────────────────────
