@@ -105,6 +105,35 @@ export function detectStudentName(filename) {
 // ─── Admissibility helpers ────────────────────────────────────────────────────
 
 /**
+ * Count distinct listado items across an Excel file.
+ * An item row is: col A matches item# pattern (e.g. "1", "1.1", "2.3.1")
+ *   AND the row contains a unit keyword AND a positive quantity.
+ * Uses a Set so the same item# is counted once even if repeated across sheets.
+ */
+export function countListadoItems(excelData) {
+  if (!excelData?.sheets?.length) return 0;
+  const UNIT_RE = /\b(m2|m²|ml|m3|m³|kg|un\.?|und\.?|unid\.?|gl\.?|glb\.?|pm|hr|h|lts?|ton|jgo|m\b)/i;
+  const seen = new Set();
+
+  for (const sheet of excelData.sheets) {
+    for (const row of sheet.rows) {
+      if (!row[0]) continue;
+      const firstCell = String(row[0].value ?? '').trim();
+      if (!/^\d{1,2}(\.\d{1,2}){0,2}$/.test(firstCell)) continue;
+      const rowText = row.map(c => String(c?.value ?? '')).join(' ');
+      if (!UNIT_RE.test(rowText)) continue;
+      const hasQty = row.some(c => {
+        if (!c) return false;
+        const v = parseFloat(String(c.value).replace(',', '.'));
+        return !isNaN(v) && v > 0;
+      });
+      if (hasQty) seen.add(firstCell);
+    }
+  }
+  return seen.size;
+}
+
+/**
  * Estimate fraction of activities that have a quantity (cubicaciones).
  * Looks for rows where: col A has an item code AND a later column has a number.
  */

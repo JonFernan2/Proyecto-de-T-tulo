@@ -1,9 +1,11 @@
+import { countListadoItems } from './fileParser.js';
+
 /**
  * Run admissibility checks for E1 or E2.
  * Returns { passed: bool, results: CheckResult[] }
  *
- * Checks are presence-based: verifica que cada entregable exista y tenga
- * contenido mínimo. Claude evalúa la calidad real en el paso siguiente.
+ * Cubicaciones and cotizaciones use cross-reference: count listado items (N)
+ * and compare against sheet count in each Excel (1 sheet per activity).
  */
 export function runAdmissibility(delivery, filesMap) {
   const results = [];
@@ -19,27 +21,60 @@ export function runAdmissibility(delivery, filesMap) {
       : 'No se encontró archivo EETT.',
   });
 
+  // ── Cross-reference baseline ──────────────────────────────────────────────────
+  // Count listado items (item# + unit + quantity) from cubicaciones Excel
+  const nItems = countListadoItems(filesMap.cubicaciones);
+
   // ── Cubicaciones ─────────────────────────────────────────────────────────────
   const cubPresent = hasExcelContent(filesMap.cubicaciones);
-  results.push({
-    id: 'cubicaciones',
-    label: 'Listado + Cubicaciones (obligatorio)',
-    passed: cubPresent,
-    detail: cubPresent
-      ? `Presente. ${filesMap.cubicaciones.sheets?.length ?? '?'} hoja(s), ${filesMap.cubicaciones.totalRows?.toLocaleString('es-CL') ?? '?'} filas con datos.`
-      : 'No se encontró archivo de cubicaciones.',
-  });
+  if (cubPresent) {
+    const nSheets = filesMap.cubicaciones.sheets.length;
+    // First sheet is assumed to be the listado; remaining sheets = cubicaciones
+    const nCub = nSheets > 1 ? nSheets - 1 : nSheets;
+
+    if (nItems > 0) {
+      const ratio = Math.min(nCub, nItems) / nItems;
+      results.push({
+        id: 'cubicaciones',
+        label: 'Listado + Cubicaciones (obligatorio)',
+        passed: true,
+        detail: `${nCub} hoja(s) de cubicaciones para ${nItems} actividad(es) en el listado (${Math.round(ratio * 100)}%).`,
+        ratio,
+        threshold: 0.5,
+      });
+    } else {
+      results.push({
+        id: 'cubicaciones',
+        label: 'Listado + Cubicaciones (obligatorio)',
+        passed: true,
+        detail: `Presente. ${nSheets} hoja(s). Sin actividades con formato estándar (ítem + unidad + cantidad) detectadas en el listado.`,
+      });
+    }
+  } else {
+    results.push({
+      id: 'cubicaciones',
+      label: 'Listado + Cubicaciones (obligatorio)',
+      passed: false,
+      detail: 'No se encontró archivo de cubicaciones.',
+    });
+  }
 
   // ── Cotizaciones ─────────────────────────────────────────────────────────────
   const cotFiles = filesMap.cotizacionesFiles ?? [];
   const wordCotFiles = cotFiles.filter(f => f.parsed?.text !== undefined);
   const excelCotFile = filesMap.cotizaciones?.sheets ? filesMap.cotizaciones : null;
 
-  let cotPassed, cotDetail, forceScore;
+  let cotPassed, cotDetail, forceScore, cotRatio;
 
   if (excelCotFile) {
+    const nCotSheets = excelCotFile.sheets.length;
     cotPassed = true;
-    cotDetail = `Presente en Excel. ${excelCotFile.sheets?.length ?? '?'} hoja(s).`;
+    if (nItems > 0) {
+      cotRatio = Math.min(nCotSheets, nItems) / nItems;
+      cotDetail = `${nCotSheets} hoja(s) de cotizaciones para ${nItems} actividad(es) del listado (${Math.round(cotRatio * 100)}%).`;
+    } else {
+      cotDetail = `Presente en Excel. ${nCotSheets} hoja(s).`;
+    }
   } else if (wordCotFiles.length > 0) {
     cotPassed = false;
     forceScore = 1.0;
@@ -56,6 +91,7 @@ export function runAdmissibility(delivery, filesMap) {
     passed: cotPassed,
     detail: cotDetail,
     forceScore,
+    ...(cotRatio !== undefined ? { ratio: cotRatio, threshold: 0.8 } : {}),
   });
 
   // ── APU (solo E2) ────────────────────────────────────────────────────────────
