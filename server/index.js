@@ -57,11 +57,19 @@ VALIDACIÓN ARITMÉTICA DE CUBICACIONES (obligatorio):
 - Señala si hay menos de 2 decimales o redondeos incorrectos
 
 EVALUACIÓN CRUZADA (obligatorio):
-- El LISTADO DE ACTIVIDADES es la referencia base; todas las actividades del listado deben tener cubicación
-- Identifica actividades del listado que NO tienen cubicación (por partida)
-- Verifica que los materiales cotizados correspondan a los materiales requeridos en las cubicaciones
-- Identifica materiales presentes en cubicaciones que NO tienen cotización
-- Señala si las unidades de medida son consistentes entre listado, cubicaciones y cotizaciones
+Los archivos llegan separados en bloques <seccion id="...">. Cada sección es un documento distinto:
+- <seccion id="listado"> = el listado de actividades (REFERENCIA BASE)
+- <seccion id="cubicaciones"> = las hojas con fórmulas y mediciones (NO tiene precios)
+- <seccion id="cotizaciones"> = las cotizaciones con proveedores y precios (NO tiene fórmulas)
+- <seccion id="apu"> = el APU con mano de obra, materiales y equipos (solo E2)
+
+NUNCA atribuyas a cotizaciones algo que esté en cubicaciones, ni viceversa.
+Al escribir la justificación, cita en qué sección encontraste el dato (ej: "En las cubicaciones verifiqué...", "Al revisar las cotizaciones observé...").
+
+Evaluación cruzada que debes hacer:
+- Actividades del listado que NO tienen hoja de cubicación (identifica cuáles)
+- Materiales en cubicaciones sin cotización correspondiente (identifica cuáles)
+- Inconsistencias de unidades entre listado, cubicaciones y cotizaciones
 
 La nota es HOLÍSTICA (no promedio matemático): los porcentajes son guía de importancia relativa.
 
@@ -84,65 +92,167 @@ function buildUserContent(delivery, studentName, payload) {
 
   const contentBlocks = [];
 
-  let text = `## CORRECCIÓN: ${delivery} — Estudiante: ${studentName}\n\n`;
+  let text = `## CORRECCIÓN ${delivery} — Estudiante: ${studentName}\n\n`;
   text += getRubric(delivery);
-  text += '\n\n---\n\n## ARCHIVOS ENTREGADOS\n\n';
+  text += '\n\n---\n\n';
+  text += `IMPORTANTE: Cada bloque <seccion> corresponde a un DOCUMENTO DISTINTO del estudiante.
+No mezcles información entre secciones. Al citar un dato, indica explícitamente de qué sección proviene.
+La sección LISTADO es la referencia base para la evaluación cruzada.\n\n`;
 
   if (delivery === 'E1') {
+    // ── SECCIÓN 1: EETT ──────────────────────────────────────────────────────
+    text += `<seccion id="eett" documento="Especificaciones Técnicas">\n`;
     text += formatEett(eett);
-    text += formatExcel('LISTADO DE ACTIVIDADES Y CUBICACIONES', cubicaciones);
-    // Cotizaciones: accept Word docs or Excel
+    text += `</seccion>\n\n`;
+
+    // ── SECCIÓN 2 y 3: Separar listado de cubicaciones ───────────────────────
+    const { listadoText, cubicacionesText, nListado, nCubSheets } =
+      splitListadoYCubicaciones(cubicaciones);
+
+    text += `<seccion id="listado" documento="Listado de Actividades" n_actividades="${nListado}">\n`;
+    text += `ESTE ES EL LISTADO DE ACTIVIDADES — referencia base para la evaluación cruzada.\n`;
+    text += `Cada fila aquí debe tener cubicación en la sección cubicaciones y material cotizado en cotizaciones.\n\n`;
+    text += listadoText;
+    text += `</seccion>\n\n`;
+
+    text += `<seccion id="cubicaciones" documento="Hojas de Cubicaciones" n_hojas="${nCubSheets}">\n`;
+    text += `ESTE ES EL LIBRO DE CUBICACIONES — contiene las mediciones y fórmulas por actividad.\n`;
+    text += `No contiene precios ni proveedores; eso está en la sección cotizaciones.\n\n`;
+    text += cubicacionesText;
+    text += `</seccion>\n\n`;
+
+    // ── SECCIÓN 4: COTIZACIONES ───────────────────────────────────────────────
+    text += `<seccion id="cotizaciones" documento="Cotizaciones de materiales">\n`;
+    text += `ESTE ES EL ARCHIVO DE COTIZACIONES — contiene precios y proveedores.\n`;
+    text += `No contiene fórmulas de medición; eso está en la sección cubicaciones.\n\n`;
     const wordCots = (cotizacionesFiles ?? []).filter(f => f.parsed?.text !== undefined);
     if (wordCots.length > 0) {
-      text += `\n### COTIZACIONES (${wordCots.length} archivos Word)\n`;
+      text += `Formato: ${wordCots.length} archivo(s) Word\n`;
       wordCots.forEach(({ name, parsed }) => {
         text += `\n**Archivo: ${name}**\n`;
         text += formatEett(parsed);
       });
     } else {
-      text += formatExcel('COTIZACIONES', cotizaciones);
+      text += formatExcel('', cotizaciones);
     }
     if (pdfNames?.length) {
-      text += `\n### PDFs de respaldo cotizaciones\n${pdfNames.map(n => `- ${n}`).join('\n')}\n`;
+      text += `\nPDFs de respaldo adjuntos: ${pdfNames.join(', ')}\n`;
     }
+    text += `</seccion>\n\n`;
+
   } else {
+    // ── E2 ───────────────────────────────────────────────────────────────────
+    text += `<seccion id="eett" documento="Especificaciones Técnicas E1">\n`;
     text += formatEett(eett);
-    text += formatExcel('LISTADO + CUBICACIONES (referencia E1)', cubicaciones);
+    text += `</seccion>\n\n`;
+
+    const { listadoText, cubicacionesText, nListado, nCubSheets } =
+      splitListadoYCubicaciones(cubicaciones);
+
+    text += `<seccion id="listado" documento="Listado de Actividades E1" n_actividades="${nListado}">\n`;
+    text += listadoText;
+    text += `</seccion>\n\n`;
+
+    text += `<seccion id="cubicaciones" documento="Cubicaciones E1" n_hojas="${nCubSheets}">\n`;
+    text += cubicacionesText;
+    text += `</seccion>\n\n`;
+
+    text += `<seccion id="cotizaciones" documento="Cotizaciones E1">\n`;
     const wordCots = (cotizacionesFiles ?? []).filter(f => f.parsed?.text !== undefined);
     if (wordCots.length > 0) {
-      text += `\n### COTIZACIONES E1 (${wordCots.length} archivos Word)\n`;
       wordCots.forEach(({ name, parsed }) => {
         text += `\n**Archivo: ${name}**\n`;
         text += formatEett(parsed);
       });
     } else {
-      text += formatExcel('COTIZACIONES (referencia E1)', cotizaciones);
+      text += formatExcel('', cotizaciones);
     }
-    text += formatExcel('APU — ANÁLISIS DE PRECIOS UNITARIOS', apu);
+    text += `</seccion>\n\n`;
+
+    text += `<seccion id="apu" documento="APU — Análisis de Precios Unitarios">\n`;
+    text += `ESTE ES EL APU — contiene mano de obra, materiales, fletes y equipos por partida.\n`;
+    text += `Los precios de materiales deben ser coherentes con la sección cotizaciones.\n\n`;
+    text += formatExcel('', apu);
+    text += `</seccion>\n\n`;
   }
 
   contentBlocks.push({ type: 'text', text });
 
-  // Attach images for cubicaciones respaldo (vision)
   if (images?.length) {
     contentBlocks.push({
       type: 'text',
-      text: `\n## IMÁGENES DE RESPALDO CUBICACIONES (${images.length} adjuntas)\nVerifica coherencia entre fórmulas del Excel y estos cálculos manuales:\n`,
+      text: `<seccion id="imagenes_respaldo" documento="Respaldo fotográfico cubicaciones" n_imagenes="${images.length}">\nVerifica coherencia entre fórmulas del Excel (sección cubicaciones) y estos cálculos manuales:\n`,
     });
     images.slice(0, 5).forEach(({ data, mediaType }) => {
-      contentBlocks.push({
-        type: 'image',
-        source: { type: 'base64', media_type: mediaType, data },
-      });
+      contentBlocks.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data } });
     });
+    contentBlocks.push({ type: 'text', text: `</seccion>\n` });
   }
 
   contentBlocks.push({
     type: 'text',
-    text: '\n\n---\nDevuelve SOLO el JSON de evaluación según la estructura indicada en el system prompt.',
+    text: '\n---\nDevuelve SOLO el JSON de evaluación. Recuerda: no mezcles contenido entre secciones en tus justificaciones.',
   });
 
   return contentBlocks;
+}
+
+// ─── Separar listado del resto de cubicaciones ────────────────────────────────
+function splitListadoYCubicaciones(cubicacionesData) {
+  if (!cubicacionesData?.sheets?.length) {
+    return { listadoText: '_(No entregado)_\n', cubicacionesText: '_(No entregado)_\n', nListado: 0, nCubSheets: 0 };
+  }
+
+  // Buscar hoja de listado por nombre
+  const listadoIdx = cubicacionesData.sheets.findIndex(s =>
+    /listado|itemizado|actividades?|partidas?/i.test(s.name),
+  );
+
+  const listadoSheet = listadoIdx >= 0 ? cubicacionesData.sheets[listadoIdx] : null;
+  const cubSheets = cubicacionesData.sheets.filter((_, i) => i !== listadoIdx);
+
+  // Formatear listado
+  let listadoText = '';
+  let nListado = 0;
+  if (listadoSheet) {
+    listadoText += `Hoja: "${listadoSheet.name}" — ${listadoSheet.rows.length} filas\n\n`;
+    listadoSheet.rows.slice(0, 200).forEach(row => {
+      const cells = row.map(c => (!c ? '' : String(c.value ?? ''))).filter(Boolean);
+      if (cells.length) { listadoText += cells.join(' | ') + '\n'; nListado++; }
+    });
+    if (listadoSheet.rows.length > 200) listadoText += `... (${listadoSheet.rows.length - 200} filas más)\n`;
+  } else {
+    // Sin hoja de listado: tomar primera hoja como referencia
+    const firstSheet = cubicacionesData.sheets[0];
+    listadoText += `(No se encontró hoja "Listado" — mostrando primera hoja: "${firstSheet.name}")\n\n`;
+    firstSheet.rows.slice(0, 100).forEach(row => {
+      const cells = row.map(c => (!c ? '' : String(c.value ?? ''))).filter(Boolean);
+      if (cells.length) { listadoText += cells.join(' | ') + '\n'; nListado++; }
+    });
+  }
+
+  // Formatear cubicaciones (sin la hoja listado)
+  let cubicacionesText = '';
+  const sheetsToShow = cubSheets.slice(0, 20);
+  cubicacionesText += `Total hojas de cubicaciones: ${cubSheets.length}\n`;
+  cubicacionesText += `(Se muestran las primeras ${sheetsToShow.length} hojas)\n\n`;
+  sheetsToShow.forEach(sheet => {
+    cubicacionesText += `**Hoja: ${sheet.name}**\n`;
+    sheet.rows.slice(0, 60).forEach(row => {
+      const cells = row.map(c => {
+        if (!c) return '';
+        let val = String(c.value ?? '');
+        if (c.formula) val += ` [fórmula: ${c.formula}]`;
+        return val;
+      }).filter(Boolean);
+      if (cells.length) cubicacionesText += cells.join(' | ') + '\n';
+    });
+    if (sheet.rows.length > 60) cubicacionesText += `... (${sheet.rows.length - 60} filas más)\n`;
+    cubicacionesText += '\n';
+  });
+  if (cubSheets.length > 20) cubicacionesText += `[... ${cubSheets.length - 20} hojas más no mostradas]\n`;
+
+  return { listadoText, cubicacionesText, nListado, nCubSheets: cubSheets.length };
 }
 
 // ─── Rubric text ──────────────────────────────────────────────────────────────
@@ -231,9 +341,9 @@ ${snippet}
 }
 
 function formatExcel(label, data) {
-  if (!data?.sheets?.length) return `\n### ${label}\n_(No entregado)_\n`;
+  if (!data?.sheets?.length) return label ? `\n### ${label}\n_(No entregado)_\n` : '_(No entregado)_\n';
 
-  let out = `\n### ${label}\n`;
+  let out = label ? `\n### ${label}\n` : '';
   out += `Hojas: ${data.sheets.length} | Filas totales con datos: ${data.totalRows ?? 'N/D'}\n\n`;
 
   data.sheets.slice(0, 20).forEach(sheet => {
