@@ -16,7 +16,7 @@ export async function parseExcel(file) {
     const range = XLSX.utils.decode_range(ws['!ref'] ?? 'A1:A1');
     const rows = [];
 
-    for (let r = range.s.r; r <= Math.min(range.e.r, 200); r++) {
+    for (let r = range.s.r; r <= Math.min(range.e.r, 600); r++) {
       const row = [];
       for (let c = range.s.c; c <= Math.min(range.e.c, 20); c++) {
         const cellRef = XLSX.utils.encode_cell({ r, c });

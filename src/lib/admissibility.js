@@ -29,8 +29,8 @@ export function runAdmissibility(delivery, filesMap) {
   const cubPresent = hasExcelContent(filesMap.cubicaciones);
   if (cubPresent) {
     const nSheets = filesMap.cubicaciones.sheets.length;
-    // First sheet is assumed to be the listado; remaining sheets = cubicaciones
-    const nCub = nSheets > 1 ? nSheets - 1 : nSheets;
+    // All sheets count as cubicaciones (1 sheet per activity is the expected format)
+    const nCub = nSheets;
 
     if (nItems > 0) {
       const ratio = Math.min(nCub, nItems) / nItems;
@@ -38,7 +38,7 @@ export function runAdmissibility(delivery, filesMap) {
         id: 'cubicaciones',
         label: 'Listado + Cubicaciones (obligatorio)',
         passed: true,
-        detail: `${nCub} hoja(s) de cubicaciones para ${nItems} actividad(es) en el listado (${Math.round(ratio * 100)}%).`,
+        detail: `${nCub} hoja(s) de cubicaciones · ${nItems} actividad(es) en el listado (${Math.round(ratio * 100)}% cubicado).`,
         ratio,
         threshold: 0.5,
       });
@@ -71,7 +71,7 @@ export function runAdmissibility(delivery, filesMap) {
     cotPassed = true;
     if (nItems > 0) {
       cotRatio = Math.min(nCotSheets, nItems) / nItems;
-      cotDetail = `${nCotSheets} hoja(s) de cotizaciones para ${nItems} actividad(es) del listado (${Math.round(cotRatio * 100)}%).`;
+      cotDetail = `${nCotSheets} hoja(s) de cotizaciones · ${nItems} actividad(es) en el listado (${Math.round(cotRatio * 100)}% cotizado).`;
     } else {
       cotDetail = `Presente en Excel. ${nCotSheets} hoja(s).`;
     }
