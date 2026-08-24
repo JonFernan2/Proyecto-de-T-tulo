@@ -12,6 +12,59 @@ const MODEL = 'claude-sonnet-4-6';
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
+// ─── Image verification endpoint ─────────────────────────────────────────────
+app.post('/api/verify-images', async (req, res) => {
+  try {
+    const { studentName, cubicacionesContext, images, batchIndex, totalBatches } = req.body;
+
+    const contentBlocks = [];
+
+    contentBlocks.push({
+      type: 'text',
+      text: `Eres el docente Jonathan Fernando Muñoz Alvarez revisando el respaldo fotográfico de cubicaciones del estudiante ${studentName}.
+
+Tu tarea es comparar las imágenes adjuntas (tanda ${batchIndex + 1} de ${totalBatches}) contra las fórmulas y resultados del Excel de cubicaciones.
+
+CONTEXTO DEL EXCEL DE CUBICACIONES:
+${cubicacionesContext}
+
+Para cada imagen analizada indica:
+1. Qué partida o actividad representa (si es legible)
+2. Si los números y cálculos manuales de la imagen son coherentes con las fórmulas del Excel
+3. Si encuentras errores aritméticos, diferencias o inconsistencias — señálalos con el valor correcto
+4. Si la imagen es ilegible o no corresponde a cálculos de cubicaciones, indícalo brevemente
+
+Escribe en primera persona como Jonathan revisando. Sé específico con los números.
+RESPONDE con un objeto JSON:
+{
+  "findings": "texto con todos los hallazgos de esta tanda",
+  "hasErrors": true/false,
+  "errorCount": N
+}`,
+    });
+
+    images.forEach(({ data, mediaType }) => {
+      contentBlocks.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data } });
+    });
+
+    const message = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 2048,
+      messages: [{ role: 'user', content: contentBlocks }],
+    });
+
+    const rawText = message.content.find(b => b.type === 'text')?.text ?? '';
+    const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) throw new Error('La IA no devolvió JSON válido en verificación de imágenes.');
+
+    const result = JSON.parse(jsonMatch[0]);
+    res.json({ ok: true, result });
+  } catch (err) {
+    console.error('[verify-images] ERROR:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ─── Evaluate endpoint ────────────────────────────────────────────────────────
 app.post('/api/evaluate', async (req, res) => {
   try {
@@ -177,17 +230,6 @@ La sección LISTADO es la referencia base para la evaluación cruzada.\n\n`;
   }
 
   contentBlocks.push({ type: 'text', text });
-
-  if (images?.length) {
-    contentBlocks.push({
-      type: 'text',
-      text: `<seccion id="imagenes_respaldo" documento="Respaldo fotográfico cubicaciones" n_imagenes="${images.length}">\nVerifica coherencia entre fórmulas del Excel (sección cubicaciones) y estos cálculos manuales:\n`,
-    });
-    images.slice(0, 5).forEach(({ data, mediaType }) => {
-      contentBlocks.push({ type: 'image', source: { type: 'base64', media_type: mediaType, data } });
-    });
-    contentBlocks.push({ type: 'text', text: `</seccion>\n` });
-  }
 
   contentBlocks.push({
     type: 'text',
