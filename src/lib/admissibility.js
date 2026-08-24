@@ -1,96 +1,73 @@
-import {
-  measureCubicacionesCoverage,
-  measureCotizacionesCoverage,
-  measureApuCoverage,
-} from './fileParser.js';
-
 /**
  * Run admissibility checks for E1 or E2.
  * Returns { passed: bool, results: CheckResult[] }
  *
- * CheckResult: { id, label, passed, detail, ratio?, threshold? }
+ * Checks are presence-based: verifica que cada entregable exista y tenga
+ * contenido mínimo. Claude evalúa la calidad real en el paso siguiente.
  */
 export function runAdmissibility(delivery, filesMap) {
   const results = [];
 
-  // ── EETT ────────────────────────────────────────────────────────────────────
+  // ── EETT ─────────────────────────────────────────────────────────────────────
   const eettPresent = Boolean(filesMap.eett?.text?.trim());
   results.push({
     id: 'eett',
-    label: 'EETT (Word obligatorio)',
+    label: 'EETT (obligatorio)',
     passed: eettPresent,
     detail: eettPresent
       ? `Presente. ${filesMap.eett.wordCount?.toLocaleString('es-CL') ?? '?'} palabras.`
-      : 'Archivo Word no encontrado. La entrega se rechaza.',
+      : 'No se encontró archivo EETT.',
   });
 
   // ── Cubicaciones ─────────────────────────────────────────────────────────────
-  const cubCoverage = measureCubicacionesCoverage(filesMap.cubicaciones);
-  const cubThreshold = 0.5;
-  const cubPassed = cubCoverage.total > 0 && cubCoverage.ratio >= cubThreshold;
+  const cubPresent = hasExcelContent(filesMap.cubicaciones);
   results.push({
     id: 'cubicaciones',
-    label: `Cubicaciones (mín. ${cubThreshold * 100}% de partidas)`,
-    passed: cubPassed,
-    ratio: cubCoverage.ratio,
-    threshold: cubThreshold,
-    detail:
-      cubCoverage.total === 0
-        ? 'No se encontró archivo de cubicaciones o no contiene partidas legibles.'
-        : `${cubCoverage.covered} de ${cubCoverage.total} partidas cubicadas (${pct(cubCoverage.ratio)}).`,
+    label: 'Listado + Cubicaciones (obligatorio)',
+    passed: cubPresent,
+    detail: cubPresent
+      ? `Presente. ${filesMap.cubicaciones.sheets?.length ?? '?'} hoja(s), ${filesMap.cubicaciones.totalRows?.toLocaleString('es-CL') ?? '?'} filas con datos.`
+      : 'No se encontró archivo de cubicaciones.',
   });
 
-  // ── Cotizaciones ──────────────────────────────────────────────────────────────
-  // Support Word-based cotizaciones (multiple .docx files) and Excel
+  // ── Cotizaciones ─────────────────────────────────────────────────────────────
   const cotFiles = filesMap.cotizacionesFiles ?? [];
   const wordCotFiles = cotFiles.filter(f => f.parsed?.text !== undefined);
   const excelCotFile = filesMap.cotizaciones?.sheets ? filesMap.cotizaciones : null;
 
-  let cotPassed, cotDetail, cotRatio;
-  const cotThreshold = 0.8;
+  let cotPassed, cotDetail, forceScore;
 
-  if (wordCotFiles.length > 0) {
-    // Word-based: format is incorrect per pauta — force 1.0 on that criterion
+  if (excelCotFile) {
+    cotPassed = true;
+    cotDetail = `Presente en Excel. ${excelCotFile.sheets?.length ?? '?'} hoja(s).`;
+  } else if (wordCotFiles.length > 0) {
     cotPassed = false;
-    cotRatio = 0;
-    cotDetail = `Formato incorrecto: se entregaron ${wordCotFiles.length} archivo(s) Word. La pauta exige Excel con tabla de proveedores. El criterio se calificará con nota 1,0.`;
-  } else if (excelCotFile) {
-    const cotCoverage = measureCotizacionesCoverage(excelCotFile);
-    cotPassed = cotCoverage.total > 0 && cotCoverage.ratio >= cotThreshold;
-    cotRatio = cotCoverage.ratio;
-    cotDetail = cotCoverage.total === 0
-      ? 'No se encontró archivo de cotizaciones o no contiene materiales legibles.'
-      : `${cotCoverage.quoted} de ${cotCoverage.total} materiales cotizados (${pct(cotCoverage.ratio)}).`;
+    forceScore = 1.0;
+    cotDetail = `Formato incorrecto: ${wordCotFiles.length} archivo(s) Word. La pauta exige Excel. Criterio se calificará con nota 1,0.`;
   } else {
     cotPassed = false;
-    cotRatio = 0;
-    cotDetail = 'No se encontró archivo de cotizaciones.';
+    forceScore = 1.0;
+    cotDetail = 'No se encontró archivo de cotizaciones. Criterio se calificará con nota 1,0.';
   }
 
   results.push({
     id: 'cotizaciones',
-    label: `Cotizaciones (mín. ${cotThreshold * 100}% de materiales)`,
+    label: 'Cotizaciones',
     passed: cotPassed,
-    ratio: cotRatio,
-    threshold: cotThreshold,
     detail: cotDetail,
-    forceScore: cotPassed ? undefined : 1.0,
+    forceScore,
   });
 
   // ── APU (solo E2) ────────────────────────────────────────────────────────────
   if (delivery === 'E2') {
-    const apuCoverage = measureApuCoverage(filesMap.apu);
-    const apuPassed = apuCoverage.total > 0 && apuCoverage.ratio >= 1.0;
+    const apuPresent = hasExcelContent(filesMap.apu);
     results.push({
       id: 'apu',
-      label: 'APU Cartillas (100% de actividades completas)',
-      passed: apuPassed,
-      ratio: apuCoverage.ratio,
-      threshold: 1.0,
-      detail:
-        apuCoverage.total === 0
-          ? 'No se encontró archivo APU o no contiene hojas con datos.'
-          : `${apuCoverage.complete} de ${apuCoverage.total} cartillas APU con contenido suficiente (${pct(apuCoverage.ratio)}).`,
+      label: 'APU Cartillas (obligatorio)',
+      passed: apuPresent,
+      detail: apuPresent
+        ? `Presente. ${filesMap.apu.sheets?.length ?? '?'} hoja(s).`
+        : 'No se encontró archivo APU.',
     });
   }
 
@@ -98,6 +75,6 @@ export function runAdmissibility(delivery, filesMap) {
   return { passed, results };
 }
 
-function pct(ratio) {
-  return `${Math.round(ratio * 100)}%`;
+function hasExcelContent(data) {
+  return Boolean(data?.sheets?.length > 0 && data.totalRows > 0);
 }
