@@ -1,17 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useGradingStore } from '../store/useGradingStore.js';
-import { evaluateWithClaude, verifyImages } from '../lib/claudeEval.js';
+import { deepReview, verifyImages } from '../lib/claudeEval.js';
 import { DELIVERIES } from '../lib/rubric.js';
 
-const PHASES = {
-  text: 'text',
-  images: 'images',
-};
+const ETIQUETAS = { cub: 'Cubicaciones', cot: 'Cotizaciones', apu: 'Cartillas APU' };
 
 export default function Step4_EvalLoading() {
   const { delivery, studentName, getFilesMap, getImages, setEvaluation, setEvalError, goTo } = useGradingStore();
-  const [phase, setPhase] = useState(PHASES.text);
-  const [imageBatch, setImageBatch] = useState({ current: 0, total: 0 });
+  const [progress, setProgress] = useState({ fase: 'enviando' });
+  const [imageBatch, setImageBatch] = useState(null);
   const [error, setError] = useState(null);
   const started = useRef(false);
 
@@ -23,58 +20,55 @@ export default function Step4_EvalLoading() {
     const images = getImages();
 
     async function run() {
-      // ── Fase 1: Evaluación de texto ─────────────────────────────────────────
-      setPhase(PHASES.text);
       const { admissibility } = useGradingStore.getState();
-      const evaluation = await evaluateWithClaude({ delivery, studentName, filesMap, admissibility });
 
-      // ── Fase 2: Verificación fotográfica (si hay imágenes) ──────────────────
+      // ── Revisión profunda hoja por hoja ─────────────────────────────────────
+      const { evaluation, cobertura } = await deepReview({
+        delivery, studentName, filesMap, admissibility,
+        onProgress: setProgress,
+      });
+
+      evaluation.cobertura = cobertura;
+
+      // ── Respaldo fotográfico ────────────────────────────────────────────────
       if (images?.length > 0) {
-        setPhase(PHASES.images);
+        setProgress({ fase: 'imagenes' });
         setImageBatch({ current: 0, total: Math.ceil(images.length / 15) });
 
         const imageResult = await verifyImages({
           studentName,
           cubicaciones: filesMap.cubicaciones ?? null,
           images,
-          onProgress: (batchIndex, totalBatches) => {
-            setImageBatch({ current: batchIndex + 1, total: totalBatches });
-          },
+          onProgress: (i, total) => setImageBatch({ current: i + 1, total }),
         });
 
-        // Fusionar hallazgos fotográficos en criterio cubicaciones/materiales
         if (imageResult?.findings) {
           const cubId = delivery === 'E1' ? 'cubicaciones' : 'materiales';
           const crit = evaluation.criteria?.find(c => c.id === cubId);
           if (crit) {
-            crit.justification =
-              crit.justification +
-              `\n\nRESPALDO FOTOGRÁFICO (${imageResult.totalImages} imágenes revisadas): ` +
-              imageResult.findings;
+            crit.justification += `\n\nRESPALDO FOTOGRÁFICO (${imageResult.totalImages} imágenes revisadas): ${imageResult.findings}`;
           }
           if (imageResult.totalErrors > 0) {
             evaluation.globalJustification =
               (evaluation.globalJustification ?? '') +
-              ` Se detectaron ${imageResult.totalErrors} inconsistencia(s) entre el respaldo fotográfico y las fórmulas de cubicaciones.`;
+              ` Encontré ${imageResult.totalErrors} inconsistencia(s) entre el respaldo fotográfico y las fórmulas de cubicaciones.`;
           }
         }
       }
 
-      // ── Aplicar ajustes de admisibilidad y pasar a resultados ───────────────
+      // ── Ajustes de admisibilidad ────────────────────────────────────────────
       const { setAdjustment, setGlobalScore } = useGradingStore.getState();
-
       const forced = {};
       for (const r of admissibility?.results ?? []) {
         if (r.forceScore !== undefined) forced[r.id] = r.forceScore;
       }
-
       for (const c of evaluation.criteria ?? []) {
         const score = forced[c.id] !== undefined ? forced[c.id] : c.score;
-        const obs = forced[c.id] !== undefined
-          ? 'Formato incorrecto según la pauta. Nota mínima aplicada automáticamente.'
-          : '';
         setAdjustment(c.id, 'score', score);
-        setAdjustment(c.id, 'observation', obs);
+        setAdjustment(c.id, 'observation',
+          forced[c.id] !== undefined
+            ? 'Formato incorrecto según la pauta. Nota mínima aplicada automáticamente.'
+            : '');
       }
 
       setGlobalScore(evaluation.globalScore);
@@ -92,11 +86,8 @@ export default function Step4_EvalLoading() {
     return (
       <div className="py-20 text-center space-y-4">
         <div className="text-5xl">⚠️</div>
-        <div className="text-lg font-semibold text-red-700">Error al conectar con la IA</div>
+        <div className="text-lg font-semibold text-red-700">No se pudo completar la revisión</div>
         <div className="text-sm text-slate-600 max-w-md mx-auto">{error}</div>
-        <div className="text-xs text-slate-400">
-          Verifica que el servidor esté corriendo y que la clave ANTHROPIC_API_KEY esté configurada en .env
-        </div>
         <button
           onClick={() => goTo('admissibility')}
           className="px-6 py-2 bg-uvm-blue text-white rounded-lg text-sm font-medium hover:bg-blue-800"
@@ -107,73 +98,97 @@ export default function Step4_EvalLoading() {
     );
   }
 
-  const isImagePhase = phase === PHASES.images;
+  const { fase, plan, counts, totalTandas } = progress;
+  const listas = counts?.listas ?? 0;
+  const pctTandas = totalTandas ? (listas / totalTandas) * 100 : 0;
 
   return (
-    <div className="py-16 text-center space-y-6">
-      <div className="text-5xl animate-pulse">{isImagePhase ? '🖼️' : '📋'}</div>
-
-      <div>
-        <div className="text-lg font-bold text-slate-800 mb-1">
-          {isImagePhase ? 'Verificando respaldo fotográfico' : `Evaluando ${DELIVERIES[delivery]?.label}`}
+    <div className="py-12 space-y-6 max-w-lg mx-auto">
+      <div className="text-center">
+        <div className="text-5xl animate-pulse mb-3">
+          {fase === 'imagenes' ? '🖼️' : fase === 'consolidando' ? '📝' : '🔍'}
         </div>
-        <div className="text-sm text-slate-500">Estudiante: {studentName}</div>
+        <div className="text-lg font-bold text-slate-800">
+          Revisión detallada · {DELIVERIES[delivery]?.label}
+        </div>
+        <div className="text-sm text-slate-500">{studentName}</div>
       </div>
 
-      {/* Progress */}
-      <div className="max-w-sm mx-auto space-y-3">
-        {/* Fase 1 */}
-        <div className="flex items-center gap-3">
-          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0
-            ${!isImagePhase ? 'bg-uvm-blue text-white animate-pulse' : 'bg-green-500 text-white'}`}>
-            {isImagePhase ? '✓' : '1'}
+      {/* Plan de revisión */}
+      {plan?.length > 0 && (
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+          <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+            Alcance de esta revisión
           </div>
-          <div className="flex-1 text-left">
-            <div className={`text-sm font-medium ${isImagePhase ? 'text-green-600' : 'text-uvm-blue'}`}>
-              Evaluación de documentos (texto + Excel)
-            </div>
-            {!isImagePhase && (
-              <div className="text-xs text-slate-400">EETT · Listado · Cubicaciones · Cotizaciones</div>
-            )}
-          </div>
-        </div>
-
-        {/* Fase 2 */}
-        <div className="flex items-center gap-3">
-          <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0
-            ${isImagePhase ? 'bg-uvm-blue text-white animate-pulse' : 'bg-slate-200 text-slate-400'}`}>
-            2
-          </div>
-          <div className="flex-1 text-left">
-            <div className={`text-sm font-medium ${isImagePhase ? 'text-uvm-blue' : 'text-slate-400'}`}>
-              Verificación de respaldo fotográfico
-            </div>
-            {isImagePhase && imageBatch.total > 0 && (
-              <div className="text-xs text-slate-500">
-                Revisando tanda {imageBatch.current} de {imageBatch.total}
-                {' '}({imageBatch.total * 15} imágenes aprox.)
+          <div className="space-y-1">
+            {plan.map(p => (
+              <div key={p.kind} className="flex justify-between text-sm">
+                <span className="text-slate-700">{ETIQUETAS[p.kind] ?? p.kind}</span>
+                <span className="text-slate-500">
+                  {p.sheets} hojas · {p.batches} tandas
+                </span>
               </div>
-            )}
+            ))}
           </div>
         </div>
+      )}
+
+      {/* Fases */}
+      <div className="space-y-3">
+        <Fase n="1" activa={fase === 'enviando'} lista={fase !== 'enviando'}
+              titulo="Preparando las tandas"
+              detalle="Partiendo los libros y enviándolos a revisión" />
+
+        <Fase n="2" activa={fase === 'revisando'} lista={['consolidando', 'imagenes'].includes(fase)}
+              titulo="Revisando hoja por hoja"
+              detalle={counts
+                ? `${listas} de ${totalTandas} tandas listas${counts.conError ? ` · ${counts.conError} con error` : ''}`
+                : 'Verificando aritmética y referencias cruzadas'} />
+
+        {fase === 'revisando' && (
+          <div className="ml-9">
+            <div className="w-full bg-slate-200 rounded-full h-2">
+              <div className="h-2 rounded-full bg-uvm-blue transition-all duration-700"
+                   style={{ width: `${pctTandas}%` }} />
+            </div>
+          </div>
+        )}
+
+        <Fase n="3" activa={fase === 'imagenes'} lista={fase === 'consolidando'}
+              titulo="Respaldo fotográfico"
+              detalle={imageBatch
+                ? `Tanda ${imageBatch.current} de ${imageBatch.total}`
+                : 'Comparando cálculos manuales con el Excel'} />
+
+        <Fase n="4" activa={fase === 'consolidando'} lista={false}
+              titulo="Redactando la retroalimentación"
+              detalle="Notas por criterio y cuadro resumen" />
       </div>
 
-      {/* Bar */}
-      <div className="max-w-sm mx-auto">
-        <div className="w-full bg-slate-200 rounded-full h-2">
-          <div
-            className="h-2 rounded-full bg-uvm-blue transition-all duration-700"
-            style={{ width: isImagePhase
-              ? `${50 + (imageBatch.total > 0 ? (imageBatch.current / imageBatch.total) * 50 : 25)}%`
-              : '45%' }}
-          />
+      <div className="text-xs text-slate-400 text-center leading-relaxed">
+        La revisión completa tarda varios minutos porque se lee cada hoja del libro,
+        no una muestra. Puedes dejar esta pestaña abierta y volver después.
+      </div>
+    </div>
+  );
+}
+
+function Fase({ n, activa, lista, titulo, detalle }) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shrink-0 mt-0.5
+        ${lista ? 'bg-green-500 text-white'
+          : activa ? 'bg-uvm-blue text-white animate-pulse'
+          : 'bg-slate-200 text-slate-400'}`}>
+        {lista ? '✓' : n}
+      </div>
+      <div className="flex-1">
+        <div className={`text-sm font-medium ${
+          lista ? 'text-green-600' : activa ? 'text-uvm-blue' : 'text-slate-400'
+        }`}>
+          {titulo}
         </div>
-      </div>
-
-      <div className="text-xs text-slate-400">
-        {isImagePhase
-          ? 'Verificando coherencia entre respaldo fotográfico y fórmulas Excel...'
-          : 'Analizando documentos — esto puede tardar 30–60 segundos'}
+        {activa && <div className="text-xs text-slate-500 mt-0.5">{detalle}</div>}
       </div>
     </div>
   );

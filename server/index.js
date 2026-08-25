@@ -2,13 +2,22 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import Anthropic from '@anthropic-ai/sdk';
+import {
+  buildDeepReviewRequests,
+  formatFindingsForConsolidation,
+} from './deepReview.js';
 
 const app = express();
 app.use(cors({ origin: 'http://localhost:5173' }));
 app.use(express.json({ limit: '50mb' }));
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const MODEL = 'claude-sonnet-4-6';
+const MODEL = 'claude-sonnet-5';
+
+// Contexto de cada revisión profunda en curso, indexado por batchId.
+// Vive en memoria: si reinicias el servidor con una revisión a medio camino,
+// hay que volver a lanzarla.
+const revisiones = new Map();
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
@@ -161,6 +170,151 @@ app.post('/api/evaluate', async (req, res) => {
     res.status(500).json({ ok: false, error: err.message });
   }
 });
+
+// ─── Revisión profunda por tandas (Batch API) ────────────────────────────────
+
+// 1. Lanza la revisión: parte los libros en tandas y las envía al Batch API.
+app.post('/api/deep-review/start', async (req, res) => {
+  try {
+    const { delivery, studentName, payload } = req.body;
+
+    const { listadoText } = splitListadoYCubicaciones(payload.cubicaciones);
+
+    const { requests, plan } = buildDeepReviewRequests({
+      delivery,
+      studentName,
+      model: MODEL,
+      rubric: getRubric(delivery),
+      listadoText,
+      payload,
+    });
+
+    if (!requests.length) {
+      return res.status(400).json({
+        ok: false,
+        error: 'No hay hojas que revisar. Verifica que los archivos Excel se hayan leído correctamente.',
+      });
+    }
+
+    const batch = await anthropic.messages.batches.create({ requests });
+
+    revisiones.set(batch.id, { delivery, studentName, payload, plan, creado: Date.now() });
+
+    console.log(`[deep-review] ${studentName}: ${requests.length} tandas enviadas (batch ${batch.id})`);
+    res.json({ ok: true, batchId: batch.id, totalTandas: requests.length, plan });
+  } catch (err) {
+    console.error('[deep-review/start] ERROR:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 2. Consulta el avance. El Batch API es asíncrono: puede tardar minutos.
+app.get('/api/deep-review/status', async (req, res) => {
+  try {
+    const batch = await anthropic.messages.batches.retrieve(req.query.batchId);
+    const c = batch.request_counts ?? {};
+    res.json({
+      ok: true,
+      status: batch.processing_status,          // in_progress | canceling | ended
+      counts: {
+        procesando: c.processing ?? 0,
+        listas: c.succeeded ?? 0,
+        conError: (c.errored ?? 0) + (c.canceled ?? 0) + (c.expired ?? 0),
+      },
+    });
+  } catch (err) {
+    console.error('[deep-review/status] ERROR:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// 3. Recoge los hallazgos de todas las tandas y produce la evaluación final.
+app.post('/api/deep-review/finish', async (req, res) => {
+  try {
+    const { batchId } = req.body;
+    const ctx = revisiones.get(batchId);
+    if (!ctx) {
+      return res.status(404).json({
+        ok: false,
+        error: 'Esta revisión ya no está en memoria del servidor (¿se reinició?). Vuelve a lanzarla.',
+      });
+    }
+
+    // Recoger resultados de cada tanda
+    const findings = [];
+    const fallidas = [];
+    for await (const entry of await anthropic.messages.batches.results(batchId)) {
+      if (entry.result?.type !== 'succeeded') {
+        fallidas.push(entry.custom_id);
+        continue;
+      }
+      const toolUse = entry.result.message.content.find(b => b.type === 'tool_use');
+      if (toolUse) findings.push({ custom_id: entry.custom_id, result: toolUse.input });
+      else fallidas.push(entry.custom_id);
+    }
+
+    if (!findings.length) {
+      throw new Error('Ninguna tanda entregó resultados utilizables.');
+    }
+
+    const { texto, totales } = formatFindingsForConsolidation(findings);
+
+    // Evaluación final sobre los hallazgos reales de todas las hojas
+    const message = await anthropic.messages.create({
+      model: MODEL,
+      max_tokens: 16000,
+      system: buildSystemPrompt(ctx.delivery),
+      tools: [EVALUATE_TOOL],
+      tool_choice: { type: 'tool', name: 'submit_evaluation' },
+      messages: [{ role: 'user', content: buildConsolidationContent(ctx, texto, totales) }],
+    });
+
+    const toolUse = message.content.find(b => b.type === 'tool_use');
+    if (!toolUse) throw new Error('No se pudo consolidar la evaluación final.');
+
+    revisiones.delete(batchId);
+
+    console.log(`[deep-review] ${ctx.studentName}: consolidado · ${totales.hojas} hojas · ${totales.errores} con errores`);
+    res.json({
+      ok: true,
+      evaluation: toolUse.input,
+      cobertura: { ...totales, tandasFallidas: fallidas.length },
+    });
+  } catch (err) {
+    console.error('[deep-review/finish] ERROR:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+function buildConsolidationContent(ctx, hallazgosTexto, totales) {
+  const { delivery, studentName, payload } = ctx;
+
+  let text = `## CORRECCIÓN ${delivery} — Estudiante: ${studentName}\n\n`;
+  text += getRubric(delivery);
+  text += '\n\n---\n\n';
+  text += formatHechos(payload.admissibility, payload);
+
+  text += `REVISIÓN HOJA POR HOJA YA REALIZADA
+Revisaste el trabajo completo, hoja por hoja. Abajo están tus propios hallazgos,
+agrupados por documento. NO son una muestra: cubren ${totales.hojas} hoja(s).
+
+Totales verificados: ${totales.errores} hoja(s) con errores de cálculo · ${totales.sinFormula} hoja(s) sin fórmulas visibles.
+
+Usa estos hallazgos como base de la evaluación. Cita partidas y valores concretos
+sacados de aquí — tienes material real, no generalices. Si un documento no aparece
+abajo, es que no tenía hojas que revisar; dilo así, no afirmes que falta.
+${hallazgosTexto}
+---
+
+`;
+
+  text += `<seccion id="eett" documento="Especificaciones Técnicas">\n`;
+  text += formatEett(payload.eett);
+  text += `</seccion>\n\n`;
+
+  text += `---\nEntrega la evaluación final: notas por criterio, cuadro resumen, fortalezas y mejoras.`;
+  return text;
+}
 
 // ─── Prompt builders ──────────────────────────────────────────────────────────
 function buildSystemPrompt(delivery) {

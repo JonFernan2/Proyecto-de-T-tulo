@@ -1,12 +1,67 @@
 const BATCH_SIZE = 15;
+const POLL_MS = 8000;
+
+/**
+ * Revisión profunda: parte los libros en tandas, las manda al Batch API y
+ * consolida los hallazgos en la evaluación final.
+ *
+ * A diferencia de evaluateWithClaude(), aquí se revisan TODAS las hojas, no una
+ * muestra truncada. A cambio es asíncrona y tarda varios minutos.
+ *
+ * onProgress({ fase, plan, counts }) informa el avance.
+ */
+export async function deepReview({ delivery, studentName, filesMap, admissibility, onProgress }) {
+  const payload = buildPayload({ filesMap, admissibility });
+
+  // 1. Lanzar las tandas
+  onProgress?.({ fase: 'enviando' });
+  const startRes = await fetch('/api/deep-review/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ delivery, studentName, payload }),
+  });
+  const start = await startRes.json();
+  if (!start.ok) throw new Error(start.error ?? 'No se pudo iniciar la revisión.');
+
+  const { batchId, totalTandas, plan } = start;
+  onProgress?.({ fase: 'revisando', plan, totalTandas, counts: { listas: 0, procesando: totalTandas, conError: 0 } });
+
+  // 2. Esperar a que terminen
+  for (;;) {
+    await sleep(POLL_MS);
+
+    const statusRes = await fetch(`/api/deep-review/status?batchId=${encodeURIComponent(batchId)}`);
+    const status = await statusRes.json();
+    if (!status.ok) throw new Error(status.error ?? 'Error consultando el avance.');
+
+    onProgress?.({ fase: 'revisando', plan, totalTandas, counts: status.counts });
+    if (status.status === 'ended') break;
+  }
+
+  // 3. Consolidar
+  onProgress?.({ fase: 'consolidando', plan, totalTandas });
+  const finishRes = await fetch('/api/deep-review/finish', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ batchId }),
+  });
+  const finish = await finishRes.json();
+  if (!finish.ok) throw new Error(finish.error ?? 'No se pudo consolidar la revisión.');
+
+  return { evaluation: finish.evaluation, cobertura: finish.cobertura };
+}
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
 
 /**
  * Calls the local Express server to evaluate a delivery with Claude.
  * Images are handled separately via verifyImages().
  */
-export async function evaluateWithClaude({ delivery, studentName, filesMap, admissibility }) {
+function buildPayload({ filesMap, admissibility }) {
   const e = filesMap.eett;
-  const payload = {
+  return {
     eett: e
       ? {
           text: e.text,
@@ -37,6 +92,10 @@ export async function evaluateWithClaude({ delivery, studentName, filesMap, admi
       ? { results: admissibility.results.map(r => ({ label: r.label, detail: r.detail })) }
       : null,
   };
+}
+
+export async function evaluateWithClaude({ delivery, studentName, filesMap, admissibility }) {
+  const payload = buildPayload({ filesMap, admissibility });
 
   const res = await fetch('/api/evaluate', {
     method: 'POST',
