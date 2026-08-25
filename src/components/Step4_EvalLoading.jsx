@@ -51,7 +51,7 @@ export default function Step4_EvalLoading() {
           if (imageResult.totalErrors > 0) {
             evaluation.globalJustification =
               (evaluation.globalJustification ?? '') +
-              ` Encontré ${imageResult.totalErrors} inconsistencia(s) entre el respaldo fotográfico y las fórmulas de cubicaciones.`;
+              ` Se detectan ${imageResult.totalErrors} inconsistencia(s) entre el respaldo fotográfico y las fórmulas de cubicaciones.`;
           }
         }
       }

@@ -44,7 +44,7 @@ const EVALUATE_TOOL = {
         type: 'array',
         description:
           'Cuadro resumen de la revisión: entre 6 y 12 puntos concretos verificados. ' +
-          'Cada fila es un aspecto puntual de la pauta con el hallazgo real encontrado.',
+          'Cada fila es un aspecto puntual de la pauta con su hallazgo concreto.',
         items: {
           type: 'object',
           properties: {
@@ -54,7 +54,9 @@ const EVALUATE_TOOL = {
             },
             hallazgo: {
               type: 'string',
-              description: 'Lo encontrado, con dato concreto (cantidad, partida o valor). Máx 2 líneas.',
+              description:
+                'Hallazgo en voz impersonal ("se detecta...", "se observan..."), con dato ' +
+                'concreto (cantidad, partida, celda o valor). Máx 2 líneas.',
             },
             estado: {
               type: 'string',
@@ -116,7 +118,10 @@ Por cada imagen analizada indica:
 - Errores aritméticos o inconsistencias con valor concreto
 - Si la imagen es ilegible, indícalo brevemente
 
-Escribe en primera persona como Jonathan revisando. Sé específico con los números.`,
+Redacta en VOZ IMPERSONAL con "se" (pasiva refleja), sin primera persona y sin
+atribuir la revisión a ninguna herramienta. Así: "Se observa que el cálculo manual
+de la partida 2.3 arroja 45,80 m2, mientras que la hoja Excel informa 45,00 m2".
+Nunca: "encontré", "revisé", "el sistema detecta". Sé específico con los números.`,
       },
     ];
 
@@ -295,14 +300,15 @@ function buildConsolidationContent(ctx, hallazgosTexto, totales) {
   text += formatHechos(payload.admissibility, payload);
 
   text += `REVISIÓN HOJA POR HOJA YA REALIZADA
-Revisaste el trabajo completo, hoja por hoja. Abajo están tus propios hallazgos,
+El trabajo fue revisado completo, hoja por hoja. Abajo están los hallazgos
 agrupados por documento. NO son una muestra: cubren ${totales.hojas} hoja(s).
 
 Totales verificados: ${totales.errores} hoja(s) con errores de cálculo · ${totales.sinFormula} hoja(s) sin fórmulas visibles.
 
-Usa estos hallazgos como base de la evaluación. Cita partidas y valores concretos
-sacados de aquí — tienes material real, no generalices. Si un documento no aparece
-abajo, es que no tenía hojas que revisar; dilo así, no afirmes que falta.
+Usa estos hallazgos como base de la evaluación. Cita partidas, celdas y valores
+concretos sacados de aquí — hay material real, no generalices. Si un documento no
+aparece abajo, es que no tenía hojas que revisar; indícalo así, no afirmes que falta.
+Recuerda el registro impersonal: "se detecta", "se observa", "no se visualizan".
 ${hallazgosTexto}
 ---
 
@@ -320,7 +326,27 @@ ${hallazgosTexto}
 function buildSystemPrompt(delivery) {
   return `Eres el docente Jonathan Fernando Muñoz Alvarez de la asignatura "Formulación de Proyecto de Título", modalidad Licitación, Ingeniería en Construcción, Universidad Viña del Mar (UVM), Chile.
 
-Revisaste personalmente los archivos del estudiante. Escribe TODA la retroalimentación en primera persona, como si fueras Jonathan describiendo lo que encontraste al revisar. Ejemplos de tono correcto: "Al revisar las EETT encontré que...", "En el listado de actividades noté que...", "Verifiqué que las cubicaciones presentan...", "Al analizar las cotizaciones observé...". PROHIBIDO usar frases como "el sistema detecta", "la IA identifica", "se observa en el análisis", "el documento presenta".
+REGISTRO DE TONO (obligatorio en todo texto que escribas):
+Redacta en VOZ IMPERSONAL con "se" (pasiva refleja), que es el registro académico
+formal chileno para este tipo de informe. Sin primera persona y sin atribuir la
+revisión a ninguna herramienta.
+
+Así SÍ:
+- "Se detecta que las modificaciones no fueron destacadas en amarillo."
+- "Se observan incongruencias entre la cubicación informada y la fórmula aplicada."
+- "En las celdas D12 a D18 no se visualizan las fórmulas de cálculo."
+- "Se encuentran diferencias entre el listado de actividades y las hojas cubicadas."
+- "Se verifica el cumplimiento de los tres proveedores exigidos en la pauta."
+- "Se sugiere incorporar el detalle de marca y formato en cada material."
+- "La hoja 2.3 presenta un resultado de 45,00 m2 que no corresponde a la fórmula =B4*C4."
+
+Así NO:
+- Primera persona: "detecté", "encontré", "revisé", "verifiqué", "noté", "al revisar
+  las EETT observé", "en mi revisión".
+- Atribución a herramientas: "el sistema detecta", "la IA identifica", "el corrector
+  determina", "el análisis automático arroja".
+
+Cuando corresponda recomendar, usa "se sugiere", "se recomienda" o "deberá".
 
 REGLA DE VERACIDAD (la más importante — no la incumplas):
 1. Los bloques "MARCAS DE FORMATO VERIFICADAS" y "HECHOS VERIFICADOS" contienen
@@ -352,7 +378,7 @@ Los archivos llegan separados en bloques <seccion id="...">. Cada sección es un
 - <seccion id="apu"> = el APU con mano de obra, materiales y equipos (solo E2)
 
 NUNCA atribuyas a cotizaciones algo que esté en cubicaciones, ni viceversa.
-Al escribir la justificación, cita en qué sección encontraste el dato (ej: "En las cubicaciones verifiqué...", "Al revisar las cotizaciones observé...").
+Al escribir la justificación, indica en qué sección aparece el dato (ej: "En las cubicaciones se verifica...", "En las cotizaciones se observa...").
 
 Evaluación cruzada que debes hacer:
 - Actividades del listado que NO tienen hoja de cubicación (identifica cuáles)
@@ -370,15 +396,15 @@ La nota es HOLÍSTICA (no promedio matemático): los porcentajes son guía de im
 
 ESCALA: 1,0 a 7,0 en pasos de 0,5. Nota mínima de aprobación: 4,0.
 
-Cada justificación: 4-6 oraciones en primera persona (Jonathan revisando), específica
-con ejemplos concretos encontrados (nombres de partidas, valores numéricos, nombres
-de hojas), en español formal chileno.
+Cada justificación: 4-6 oraciones en voz impersonal, específica, con ejemplos
+concretos (nombres de partidas, celdas, valores numéricos, nombres de hojas),
+en español formal chileno.
 
 Además del detalle por criterio debes completar:
-- resumen: cuadro de 6 a 12 filas con los puntos concretos que verificaste
+- resumen: cuadro de 6 a 12 filas con los puntos concretos verificados
 - fortalezas: 2 a 4 aspectos bien logrados
 - mejoras: 3 a 6 acciones concretas para la próxima entrega
-Todo escrito en primera persona, sin mencionar sistemas, herramientas ni IA.`;
+Todo en voz impersonal, sin mencionar sistemas, herramientas ni IA.`;
 }
 
 function buildUserContent(delivery, studentName, payload) {

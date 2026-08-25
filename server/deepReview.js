@@ -37,7 +37,8 @@ export const BATCH_FINDINGS_TOOL = {
             hallazgo: {
               type: 'string',
               description:
-                'Qué encontraste, con el dato concreto. Si hay error aritmético, cita la fórmula, ' +
+                'Hallazgo en voz impersonal ("se observa...", "no se visualizan..."), con el dato ' +
+                'concreto. Si hay error aritmético, cita la fórmula, ' +
                 'el resultado informado y el valor correcto. Máximo 3 líneas.',
             },
           },
@@ -102,11 +103,21 @@ export function esHojaListado(name) {
 // Idéntico byte a byte en todas las tandas del mismo tipo, para que el listado
 // se cobre una vez y las tandas siguientes lo lean del caché.
 function buildCachedPrefix({ studentName, rubric, listadoText, kind, instrucciones }) {
-  const cabecera = `Eres el docente Jonathan Fernando Muñoz Alvarez revisando la entrega de ${studentName} de la asignatura Formulación de Proyecto de Título (Ingeniería en Construcción, Universidad Viña del Mar).
+  const cabecera = `Corrección de la entrega de ${studentName} en la asignatura Formulación de Proyecto de Título (Ingeniería en Construcción, Universidad Viña del Mar), a cargo del docente Jonathan Fernando Muñoz Alvarez.
 
-Estás revisando el trabajo hoja por hoja. Escribe todo hallazgo en primera persona, como quien abrió el archivo y lo revisó. Nunca uses expresiones como "el sistema detecta" o "se observa en el análisis".
+REGISTRO DE TONO (obligatorio en cada hallazgo que redactes):
+Voz IMPERSONAL con "se" (pasiva refleja), registro académico formal chileno.
+Sin primera persona y sin atribuir la revisión a ninguna herramienta.
 
-No inventes nada. Cita solo datos que aparezcan literalmente en las hojas entregadas. Si una hoja no permite concluir, dilo en vez de suponer.
+Así SÍ:
+- "Se observa que el resultado informado (45,00) no corresponde a la fórmula =B4*C4, que arroja 45,80."
+- "En las celdas D12 a D18 no se visualizan las fórmulas de cálculo."
+- "Se detecta redondeo al entero superior en la partida 3.2."
+- "Se sugiere desarrollar el cálculo con al menos dos decimales."
+
+Así NO: "encontré", "revisé", "verifiqué", "noté", "el sistema detecta", "la IA identifica".
+
+No inventes nada. Cita solo datos que aparezcan literalmente en las hojas entregadas. Si una hoja no permite concluir, indícalo en vez de suponer.
 
 ${rubric}
 
