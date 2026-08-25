@@ -6,6 +6,7 @@ import {
   buildDeepReviewRequests,
   formatFindingsForConsolidation,
 } from './deepReview.js';
+import { cargarReferencias, reportarReferencias } from './referencias.js';
 
 const app = express();
 app.use(cors({ origin: 'http://localhost:5173' }));
@@ -191,6 +192,7 @@ app.post('/api/deep-review/start', async (req, res) => {
       model: MODEL,
       rubric: getRubric(delivery),
       listadoText,
+      referencias: cargarReferencias().texto,
       payload,
     });
 
@@ -296,6 +298,7 @@ function buildConsolidationContent(ctx, hallazgosTexto, totales) {
 
   let text = `## CORRECCIÓN ${delivery} — Estudiante: ${studentName}\n\n`;
   text += getRubric(delivery);
+  text += cargarReferencias().texto;
   text += '\n\n---\n\n';
   text += formatHechos(payload.admissibility, payload);
 
@@ -414,6 +417,7 @@ function buildUserContent(delivery, studentName, payload) {
 
   let text = `## CORRECCIÓN ${delivery} — Estudiante: ${studentName}\n\n`;
   text += getRubric(delivery);
+  text += cargarReferencias().texto;
   text += '\n\n---\n\n';
   text += formatHechos(admissibility, { cubicaciones, cotizaciones, cotizacionesFiles, apu, pdfNames });
   text += `IMPORTANTE: Cada bloque <seccion> corresponde a un DOCUMENTO DISTINTO del estudiante.
@@ -812,4 +816,7 @@ function formatExcel(label, data) {
 }
 
 const PORT = process.env.PORT ?? 3001;
-app.listen(PORT, () => console.log(`[API] Servidor corriendo en http://localhost:${PORT}`));
+app.listen(PORT, () => {
+  console.log(`[API] Servidor corriendo en http://localhost:${PORT}`);
+  reportarReferencias();
+});

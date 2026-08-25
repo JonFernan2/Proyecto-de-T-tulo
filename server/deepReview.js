@@ -58,7 +58,7 @@ export const BATCH_FINDINGS_TOOL = {
  * Devuelve { requests, plan } listos para messages.batches.create().
  * `plan` describe qué se va a revisar, para mostrarlo en pantalla.
  */
-export function buildDeepReviewRequests({ delivery, studentName, model, rubric, listadoText, payload }) {
+export function buildDeepReviewRequests({ delivery, studentName, model, rubric, listadoText, referencias = '', payload }) {
   const { cubicaciones, cotizaciones, apu } = payload;
   const requests = [];
   const plan = [];
@@ -72,7 +72,7 @@ export function buildDeepReviewRequests({ delivery, studentName, model, rubric, 
         params: {
           model,
           max_tokens: 8000,
-          system: buildCachedPrefix({ studentName, rubric, listadoText, kind, instrucciones }),
+          system: buildCachedPrefix({ studentName, rubric, listadoText, referencias, kind, instrucciones }),
           tools: [BATCH_FINDINGS_TOOL],
           tool_choice: { type: 'tool', name: 'submit_batch_findings' },
           messages: [{ role: 'user', content: formatSheetsChunk(chunk, kind, i + 1, chunks.length) }],
@@ -102,7 +102,7 @@ export function esHojaListado(name) {
 // ─── Prefijo cacheado ────────────────────────────────────────────────────────
 // Idéntico byte a byte en todas las tandas del mismo tipo, para que el listado
 // se cobre una vez y las tandas siguientes lo lean del caché.
-function buildCachedPrefix({ studentName, rubric, listadoText, kind, instrucciones }) {
+function buildCachedPrefix({ studentName, rubric, listadoText, referencias, kind, instrucciones }) {
   const cabecera = `Corrección de la entrega de ${studentName} en la asignatura Formulación de Proyecto de Título (Ingeniería en Construcción, Universidad Viña del Mar), a cargo del docente Jonathan Fernando Muñoz Alvarez.
 
 REGISTRO DE TONO (obligatorio en cada hallazgo que redactes):
@@ -120,7 +120,7 @@ Así NO: "encontré", "revisé", "verifiqué", "noté", "el sistema detecta", "l
 No inventes nada. Cita solo datos que aparezcan literalmente en las hojas entregadas. Si una hoja no permite concluir, indícalo en vez de suponer.
 
 ${rubric}
-
+${referencias}
 ═══════════════════════════════════════════════════════════
 LISTADO DE ACTIVIDADES — referencia base de toda la revisión
 ═══════════════════════════════════════════════════════════
