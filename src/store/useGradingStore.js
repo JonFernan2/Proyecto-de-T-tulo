@@ -153,8 +153,14 @@ export const useGradingStore = create((set, get) => ({
 
   globalScore: null,           // professor's final global grade
   globalObservation: '',
+  // La justificación global viene redactada para la nota propuesta. Si el
+  // docente ajusta las notas, deja de corresponder y hay que poder corregirla:
+  // sin esto el PDF puede afirmar que la entrega reprueba mientras imprime una
+  // nota aprobatoria.
+  globalJustificationEdit: null,
   setGlobalScore: s => set({ globalScore: s }),
   setGlobalObservation: o => set({ globalObservation: o }),
+  setGlobalJustification: j => set({ globalJustificationEdit: j }),
 
   // ── Reset ────────────────────────────────────────────────────────────────────
   reset() {
@@ -169,6 +175,7 @@ export const useGradingStore = create((set, get) => ({
       adjustments: {},
       globalScore: null,
       globalObservation: '',
+      globalJustificationEdit: null,
     });
   },
 }));

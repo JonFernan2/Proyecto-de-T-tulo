@@ -1,4 +1,4 @@
-import { countListadoItems } from './fileParser.js';
+import { countListadoItems, medirCotizaciones } from './excelMetrics.js';
 
 // Umbral mínimo exigido para cubicaciones y cotizaciones (pauta: 50%).
 export const UMBRAL_CUBICACIONES = 0.5;
@@ -26,7 +26,7 @@ export function runAdmissibility(delivery, filesMap) {
   results.push(checkCubicaciones(filesMap.cubicaciones, nItems));
 
   // ── Cotizaciones ────────────────────────────────────────────────────────────
-  results.push(checkCotizaciones(filesMap, nItems));
+  results.push(checkCotizaciones(filesMap));
 
   // ── APU (solo E2) ───────────────────────────────────────────────────────────
   if (delivery === 'E2') {
@@ -137,7 +137,7 @@ function checkCubicaciones(cub, nItems) {
 }
 
 // ─── Cotizaciones ─────────────────────────────────────────────────────────────
-function checkCotizaciones(filesMap, nItems) {
+function checkCotizaciones(filesMap) {
   const base = { id: 'cotizaciones', label: 'Cotizaciones' };
   const entries = filesMap.cotizacionesFiles ?? [];
   const excel = filesMap.cotizaciones;                       // ya resuelto por el store
@@ -159,17 +159,20 @@ function checkCotizaciones(filesMap, nItems) {
   let cumple;
 
   if (excel) {
-    const nSheets = excel.sheets.length;
-    if (nItems > 0) {
-      ratio = Math.min(nSheets, nItems) / nItems;
+    // Se mide lo que la pauta exige —tres proveedores por material— y no hojas
+    // contra actividades: las cotizaciones son tablas, no una hoja por partida.
+    const m = medirCotizaciones(excel);
+
+    if (m.materiales > 0) {
+      ratio = m.ratio;
       cumple = ratio >= UMBRAL_COTIZACIONES;
       notas.push(
-        `${nSheets} hoja(s) de cotizaciones · ${nItems} actividad(es) en el listado ` +
-        `(${pct(ratio)} cotizado). Exigencia mínima ${pct(UMBRAL_COTIZACIONES)}: ` +
-        `${cumple ? 'CUMPLE' : 'NO CUMPLE'}.`,
+        `${m.materiales} material(es) en la planilla · ${m.conPrecio} con al menos un precio · ` +
+        `${m.conTresProveedores} con los tres proveedores que exige la pauta (${pct(ratio)}). ` +
+        `Exigencia mínima ${pct(UMBRAL_COTIZACIONES)}: ${cumple ? 'CUMPLE' : 'NO CUMPLE'}.`,
       );
     } else {
-      notas.push(`Excel de cotizaciones presente con ${nSheets} hoja(s).`);
+      notas.push(`Excel de cotizaciones presente con ${excel.sheets.length} hoja(s), sin filas de material reconocibles.`);
     }
   } else if (wordFiles.length) {
     notas.push(
