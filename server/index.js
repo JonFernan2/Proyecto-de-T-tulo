@@ -7,6 +7,9 @@ import {
   formatFindingsForConsolidation,
 } from './deepReview.js';
 import { cargarReferencias, reportarReferencias } from './referencias.js';
+import {
+  guardarRevision, cargarRevisiones, eliminarRevision, reportarRevisiones,
+} from './revisiones.js';
 
 const app = express();
 app.use(cors({ origin: 'http://localhost:5173' }));
@@ -15,10 +18,10 @@ app.use(express.json({ limit: '500mb' }));
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-sonnet-5';
 
-// Contexto de cada revisión profunda en curso, indexado por batchId.
-// Vive en memoria: si reinicias el servidor con una revisión a medio camino,
-// hay que volver a lanzarla.
-const revisiones = new Map();
+// Contexto de cada revisión en curso, indexado por batchId. Se respalda en
+// disco: el lote tarda y un reinicio a medio camino lo dejaría huérfano —
+// terminaría igual y se cobraría, sin forma de recogerlo.
+const revisiones = cargarRevisiones();
 
 app.get('/api/health', (_req, res) => res.json({ ok: true }));
 
@@ -205,7 +208,9 @@ app.post('/api/deep-review/start', async (req, res) => {
 
     const batch = await anthropic.messages.batches.create({ requests });
 
-    revisiones.set(batch.id, { delivery, studentName, payload, plan, creado: Date.now() });
+    const ctx = { delivery, studentName, payload, plan, creado: Date.now() };
+    revisiones.set(batch.id, ctx);
+    guardarRevision(batch.id, ctx);
 
     console.log(`[deep-review] ${studentName}: ${requests.length} tandas enviadas (batch ${batch.id})`);
     res.json({ ok: true, batchId: batch.id, totalTandas: requests.length, plan });
@@ -254,7 +259,8 @@ app.post('/api/deep-review/finish', async (req, res) => {
     if (!ctx) {
       return res.status(404).json({
         ok: false,
-        error: 'Esta revisión ya no está en memoria del servidor (¿se reinició?). Vuelve a lanzarla.',
+        error: 'No se encontró el registro de esta revisión. Si el lote sigue en '
+             + 'console.anthropic.com, habrá que volver a lanzarla.',
       });
     }
 
@@ -291,6 +297,7 @@ app.post('/api/deep-review/finish', async (req, res) => {
     if (!toolUse) throw new Error('No se pudo consolidar la evaluación final.');
 
     revisiones.delete(batchId);
+    eliminarRevision(batchId);
 
     console.log(`[deep-review] ${ctx.studentName}: consolidado · ${totales.hojas} hojas · ${totales.errores} con errores`);
     res.json({
@@ -880,4 +887,5 @@ const PORT = process.env.PORT ?? 3001;
 app.listen(PORT, () => {
   console.log(`[API] Servidor corriendo en http://localhost:${PORT}`);
   reportarReferencias();
+  reportarRevisiones(revisiones);
 });
