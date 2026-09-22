@@ -3,7 +3,12 @@ import { useGradingStore } from '../store/useGradingStore.js';
 import { deepReview, verifyImages } from '../lib/claudeEval.js';
 import { DELIVERIES } from '../lib/rubric.js';
 
-const ETIQUETAS = { cub: 'Cubicaciones', cot: 'Cotizaciones', apu: 'Cartillas APU' };
+const ETIQUETAS = {
+  cub: 'Cubicaciones',
+  cot: 'Cotizaciones',
+  apu: 'Cartillas APU',
+  pdf: 'Respaldo PDF de cotizaciones',
+};
 
 export default function Step4_EvalLoading() {
   const { delivery, studentName, getFilesMap, getImages, setEvaluation, setEvalError, goTo } = useGradingStore();
@@ -124,11 +129,11 @@ export default function Step4_EvalLoading() {
             Alcance de esta revisión
           </div>
           <div className="space-y-1">
-            {plan.map(p => (
+            {plan.filter(p => p.kind !== 'pdf-escaneado').map(p => (
               <div key={p.kind} className="flex justify-between text-sm">
                 <span className="text-slate-700">{ETIQUETAS[p.kind] ?? p.kind}</span>
                 <span className="text-slate-500">
-                  {p.sheets} hojas · {p.batches} tandas
+                  {p.sheets} {p.kind === 'pdf' ? 'páginas' : 'hojas'} · {p.batches} tandas
                   {p.conImagenes > 0 && (
                     <span className="text-uvm-blue"> · {p.conImagenes} con respaldo</span>
                   )}
@@ -136,6 +141,14 @@ export default function Step4_EvalLoading() {
               </div>
             ))}
           </div>
+
+          {plan.filter(p => p.kind === 'pdf-escaneado').map(p => (
+            <div key="esc" className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              {p.sheets} página(s) de respaldo vienen escaneadas, sin texto legible
+              ({p.archivos?.join(', ')}). No se pueden leer automáticamente y quedan
+              pendientes de revisión visual — no se contarán como cotizaciones faltantes.
+            </div>
+          ))}
           {!plan.some(p => p.kind === 'cub') && (
             <div className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
               No se detectaron hojas de cubicaciones. Revisa que el Excel correcto esté

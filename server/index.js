@@ -411,7 +411,7 @@ Todo en voz impersonal, sin mencionar sistemas, herramientas ni IA.`;
 }
 
 function buildUserContent(delivery, studentName, payload) {
-  const { eett, cubicaciones, listado, cotizaciones, cotizacionesFiles, apu, pdfNames, admissibility } = payload;
+  const { eett, cubicaciones, listado, cotizaciones, cotizacionesFiles, apu, pdfNames, respaldoPdfs, admissibility } = payload;
 
   const contentBlocks = [];
 
@@ -419,7 +419,7 @@ function buildUserContent(delivery, studentName, payload) {
   text += getRubric(delivery);
   text += cargarReferencias().texto;
   text += '\n\n---\n\n';
-  text += formatHechos(admissibility, { cubicaciones, listado, cotizaciones, cotizacionesFiles, apu, pdfNames });
+  text += formatHechos(admissibility, { cubicaciones, listado, cotizaciones, cotizacionesFiles, apu, pdfNames, respaldoPdfs });
   text += `IMPORTANTE: Cada bloque <seccion> corresponde a un DOCUMENTO DISTINTO del estudiante.
 No mezcles información entre secciones. Al citar un dato, indica explícitamente de qué sección proviene.
 La sección LISTADO es la referencia base para la evaluación cruzada.\n\n`;
@@ -550,6 +550,14 @@ function formatHechos(admissibility, files) {
   inv.push(nPdf > 0
     ? `- PDFs de respaldo de cotizaciones: ${nPdf} archivo(s) ENTREGADOS — ${files.pdfNames.slice(0, 25).join(', ')}${nPdf > 25 ? ', …' : ''}`
     : '- PDFs de respaldo de cotizaciones: ninguno adjunto');
+
+  for (const pdf of files.respaldoPdfs ?? []) {
+    inv.push(pdf.escaneado
+      ? `  · "${pdf.name}": ${pdf.numPages} páginas, ESCANEADO sin capa de texto. `
+        + 'No se pudo leer su contenido. Indícalo como pendiente de revisión visual; '
+        + 'NO concluyas que faltan cotizaciones.'
+      : `  · "${pdf.name}": ${pdf.numPages} páginas, ${pdf.paginasConTexto} legibles y revisadas.`);
+  }
 
   if (files.apu?.sheets?.length) {
     inv.push(`- Cartillas APU: ENTREGADAS (${files.apu.sheets.length} hojas)`);

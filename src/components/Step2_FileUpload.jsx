@@ -72,10 +72,12 @@ export default function Step2_FileUpload() {
         parsed = await parseExcel(file);
       } else if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) {
         parsed = await parseImage(file);
-      } else if (ext === 'pdf' && role === 'eett') {
+      } else if (ext === 'pdf') {
+        // Todos los PDF se leen, no solo las EETT: los de respaldo de
+        // cotizaciones traen proveedor, precio y año, que hay que cotejar
+        // contra la planilla.
         parsed = await parsePdf(file);
       }
-      // Other PDFs (respaldo): just store name, no parsing
       setParsed(id, parsed);
     } catch (err) {
       console.error(`Error parsing ${file.name}:`, err);
@@ -188,9 +190,7 @@ export default function Step2_FileUpload() {
                   const newRole = e.target.value;
                   updateFileRole(entry.id, newRole);
                   const ext = entry.file.name.split('.').pop().toLowerCase();
-                  if (ext === 'pdf' && newRole === 'eett' && !entry.parsed) {
-                    parseFile(entry.id, entry.file, newRole);
-                  }
+                  if (ext === 'pdf' && !entry.parsed) parseFile(entry.id, entry.file, newRole);
                 }}
                 className="text-xs border border-slate-300 rounded px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-uvm-blue"
               >

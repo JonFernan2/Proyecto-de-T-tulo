@@ -193,7 +193,7 @@ export async function parsePdf(file) {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
-  let fullText = '';
+  const pages = [];
   let highlightCount = 0;
   let strikeCount = 0;
   let totalAnnotations = 0;
@@ -204,7 +204,7 @@ export async function parsePdf(file) {
     const page = await pdf.getPage(i);
 
     const textContent = await page.getTextContent();
-    fullText += textContent.items.map(item => item.str).join(' ') + '\n';
+    pages.push(textContent.items.map(item => item.str).join(' ').trim());
 
     for (const a of await page.getAnnotations()) {
       totalAnnotations++;
@@ -219,17 +219,27 @@ export async function parsePdf(file) {
     }
   }
 
+  const fullText = pages.join('\n');
   const wordCount = fullText.trim().split(/\s+/).filter(Boolean).length;
 
-  // A PDF exported from Word ("flattened") keeps the colours visually but loses
-  // the annotation objects — so zero annotations is NOT proof of zero marking.
-  const verifiable = totalAnnotations > 0;
+  // Un PDF escaneado no tiene capa de texto: pdfjs no devuelve nada aunque el
+  // documento esté lleno de contenido. Hay que distinguirlo de un PDF vacío,
+  // porque en ese caso la revisión no puede leerlo y debe decirlo en vez de
+  // concluir que no hay cotizaciones.
+  const paginasConTexto = pages.filter(p => p.length > 20).length;
+  const escaneado = pdf.numPages > 0 && paginasConTexto / pdf.numPages < 0.2;
 
   return {
     text: fullText,
+    pages,
+    numPages: pdf.numPages,
+    paginasConTexto,
+    escaneado,
     wordCount,
     source: 'pdf',
-    verifiable,
+    // Un PDF exportado desde Word ("aplanado") conserva los colores pero pierde
+    // las anotaciones — cero anotaciones NO prueba que no haya marcas.
+    verifiable: totalAnnotations > 0,
     hasHighlights: highlightCount > 0,
     hasStrikethrough: strikeCount > 0,
     highlightCount,

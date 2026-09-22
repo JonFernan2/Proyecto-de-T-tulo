@@ -115,6 +115,7 @@ function buildPayload({ filesMap, admissibility }) {
     })),
     apu: filesMap.apu ?? null,
     pdfNames: filesMap.respaldoPdfNames ?? [],
+    respaldoPdfs: filesMap.respaldoPdfs ?? [],
     admissibility: admissibility
       ? { results: admissibility.results.map(r => ({ label: r.label, detail: r.detail })) }
       : null,

@@ -11,6 +11,8 @@
 export const CHUNK_CUBICACIONES = 25;
 export const CHUNK_COTIZACIONES = 25;
 export const CHUNK_APU = 12;
+// Las páginas de cotización son cortas; entran bastantes por tanda.
+export const CHUNK_PDF_PAGINAS = 30;
 
 // Filas máximas que se envían por hoja dentro de una tanda.
 const MAX_ROWS_PER_SHEET = 200;
@@ -111,7 +113,106 @@ export function buildDeepReviewRequests({ delivery, studentName, model, rubric, 
     push('apu', apu?.sheets ?? [], CHUNK_APU, INSTRUCCIONES_APU);
   }
 
+  // ── Respaldo de cotizaciones en PDF ────────────────────────────────────────
+  // Se reparten las páginas de todos los PDF en tandas, arrastrando el nombre
+  // del archivo para poder citarlo en el hallazgo.
+  const paginas = (payload.respaldoPdfs ?? []).flatMap(pdf =>
+    (pdf.pages ?? []).map((texto, i) => ({
+      archivo: pdf.name,
+      pagina: i + 1,
+      deTotal: pdf.numPages,
+      texto,
+      escaneado: pdf.escaneado,
+    })),
+  );
+
+  const legibles = paginas.filter(p => p.texto?.length > 20);
+  if (legibles.length) {
+    const chunks = chunkArray(legibles, CHUNK_PDF_PAGINAS);
+    chunks.forEach((chunk, i) => {
+      requests.push({
+        custom_id: `pdf-${String(i).padStart(3, '0')}`,
+        params: {
+          model,
+          max_tokens: 8000,
+          system: buildCachedPrefix({
+            studentName, rubric, listadoText, referencias,
+            kind: 'pdf',
+            instrucciones: instruccionesRespaldoPdf(cotizaciones),
+          }),
+          tools: [BATCH_FINDINGS_TOOL],
+          tool_choice: { type: 'tool', name: 'submit_batch_findings' },
+          messages: [{ role: 'user', content: formatPaginasPdf(chunk, i + 1, chunks.length) }],
+        },
+      });
+    });
+    plan.push({ kind: 'pdf', sheets: legibles.length, batches: chunks.length });
+  }
+
+  // Un PDF escaneado no tiene capa de texto: no es que venga vacío, es que no
+  // se puede leer. Debe informarse como tal y no como cotizaciones ausentes.
+  const escaneados = (payload.respaldoPdfs ?? []).filter(p => p.escaneado);
+  if (escaneados.length) {
+    plan.push({
+      kind: 'pdf-escaneado',
+      sheets: escaneados.reduce((s, p) => s + (p.numPages ?? 0), 0),
+      batches: 0,
+      archivos: escaneados.map(p => p.name),
+    });
+  }
+
   return { requests, plan };
+}
+
+function formatPaginasPdf(paginas, n, total) {
+  let out = `TANDA ${n} de ${total} — ${paginas.length} página(s) de respaldo de cotizaciones.\n`;
+  out += `Entrega una entrada por página revisada.\n\n`;
+  for (const p of paginas) {
+    out += `━━━ HOJA: ${p.archivo} · pág. ${p.pagina} de ${p.deTotal} ━━━\n`;
+    out += p.texto.slice(0, 6000) + '\n\n';
+  }
+  return out;
+}
+
+function instruccionesRespaldoPdf(cotizaciones) {
+  let out = `TAREA: revisar el RESPALDO EN PDF de las cotizaciones.
+
+Cada "hoja" de esta tanda es una página del PDF de respaldo. Por cada una:
+1. Identifica qué cotiza: material, proveedor y precio.
+2. AÑO: la pauta exige cotizaciones del año académico en curso y no da validez
+   a las de años anteriores. Si la página muestra una fecha de año anterior,
+   es un hallazgo. Si no hay fecha visible, dilo como dato faltante, no como
+   incumplimiento.
+3. PROVEEDOR: anota cuál es, para poder comprobar después que cada material
+   tenga tres proveedores DISTINTOS.
+4. PRECIO: compáralo con el de la planilla de cotizaciones que va más abajo.
+   Si no coinciden, cita ambas cifras: es un hallazgo importante.
+5. Si la página no es una cotización (portada, índice, página en blanco),
+   márcala "Correcta" e indícalo en una línea, sin penalizar.
+
+Usa "Con errores" cuando el año no sirva, el precio no cuadre con la planilla
+o el proveedor se repita donde deberían ser distintos. Usa "Incompleta" cuando
+falte el precio, el proveedor o la identificación del material.
+
+En el campo "item" pon el ítem de la partida al que corresponde el material,
+si se puede determinar; si no, escribe "sin identificar".
+`;
+
+  if (cotizaciones?.sheets?.length) {
+    out += `\nPLANILLA DE COTIZACIONES CONTRA LA QUE DEBES COTEJAR:\n`;
+    for (const hoja of cotizaciones.sheets.slice(0, 10)) {
+      out += `\n**Hoja: ${hoja.name}**\n`;
+      for (const row of (hoja.rows ?? []).slice(0, 120)) {
+        const cells = row.map(c => (!c ? '' : String(c.value ?? ''))).filter(Boolean);
+        if (cells.length) out += cells.join(' | ') + '\n';
+      }
+    }
+  } else {
+    out += `\nNo se entregó planilla Excel de cotizaciones: no hay contra qué cotejar
+los precios. Evalúa las páginas por sí solas e indícalo.\n`;
+  }
+
+  return out;
 }
 
 export function esHojaListado(name) {
@@ -302,7 +403,7 @@ function formatSheetsChunk(sheets, kind, n, total) {
  * alimenta la evaluación final.
  */
 export function formatFindingsForConsolidation(findings) {
-  const grupos = { cub: [], cot: [], apu: [] };
+  const grupos = { cub: [], cot: [], apu: [], pdf: [] };
   for (const f of findings) {
     const kind = f.custom_id.split('-')[0];
     if (grupos[kind]) grupos[kind].push(f);
@@ -312,6 +413,7 @@ export function formatFindingsForConsolidation(findings) {
     cub: 'CUBICACIONES',
     cot: 'COTIZACIONES',
     apu: 'APU — ANÁLISIS DE PRECIOS UNITARIOS',
+    pdf: 'RESPALDO EN PDF DE LAS COTIZACIONES',
   };
 
   let out = '';
@@ -333,7 +435,7 @@ export function formatFindingsForConsolidation(findings) {
     totalHojas += partidas.length;
 
     out += `\n<hallazgos seccion="${kind}" documento="${etiquetas[kind]}">\n`;
-    out += `Hojas revisadas: ${partidas.length} · Con errores de cálculo: ${errores} · Sin fórmulas visibles: ${sinFormula}\n\n`;
+    out += `${kind === 'pdf' ? 'Páginas' : 'Hojas'} revisadas: ${partidas.length} · Con errores de cálculo: ${errores} · Sin fórmulas visibles: ${sinFormula}\n\n`;
 
     const porEstado = agrupar(partidas, p => p.estado);
     for (const [estado, items] of Object.entries(porEstado)) {

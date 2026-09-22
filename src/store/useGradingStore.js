@@ -99,6 +99,19 @@ export const useGradingStore = create((set, get) => ({
       cotizacionesFiles: cotEntries,
       cotizacionesPdfNames: namesOf('cotizaciones', ['pdf']),
 
+      // Los PDF de respaldo traen proveedor, precio y año: se cotejan contra la
+      // planilla. Se concatenan las páginas de todos, anotando de qué archivo
+      // viene cada una para poder citarlo.
+      respaldoPdfs: [...ofRole('respaldo'), ...ofRole('cotizaciones')]
+        .filter(f => ext(f) === 'pdf' && f.parsed?.pages)
+        .map(f => ({
+          name: f.file.name,
+          pages: f.parsed.pages,
+          numPages: f.parsed.numPages,
+          escaneado: f.parsed.escaneado,
+          paginasConTexto: f.parsed.paginasConTexto,
+        })),
+
       apu: mergeExcel('apu'),
 
       respaldoPdfNames: [
