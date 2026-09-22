@@ -414,12 +414,41 @@ app.get('/api/deep-review/hallazgos', async (req, res) => {
 });
 
 // Descartar una revisión que ya no sirve (lote caducado o relanzada).
+// Quita el registro de aquí. OJO: el lote sigue corriendo del lado de la API y
+// se sigue cobrando — para detenerlo hay que cancelarlo, más abajo.
 app.delete('/api/deep-review/pendientes', (req, res) => {
   const { batchId } = req.query;
   revisiones.delete(batchId);
   eliminarRevision(batchId);
-  console.log(`[deep-review] descartada ${batchId}`);
+  console.log(`[deep-review] descartada ${batchId} (el lote sigue en la API)`);
   res.json({ ok: true });
+});
+
+// Detiene el lote de verdad. Las tandas que aún no empezaron no se cobran; las
+// que ya están en curso pueden alcanzar a terminar y sí se cobran, así que
+// cancelar recupera parte del saldo, no todo.
+app.post('/api/deep-review/cancelar', async (req, res) => {
+  try {
+    const { batchId } = req.body;
+    if (!batchId) return res.status(400).json({ ok: false, error: 'Falta el ID del lote.' });
+
+    const batch = await anthropic.messages.batches.cancel(batchId);
+    const c = batch.request_counts ?? {};
+
+    revisiones.delete(batchId);
+    eliminarRevision(batchId);
+
+    console.log(`[deep-review] CANCELADO ${batchId} · ${c.succeeded ?? 0} tandas ya completadas`);
+    res.json({
+      ok: true,
+      estado: batch.processing_status,
+      completadas: c.succeeded ?? 0,
+      enCurso: c.processing ?? 0,
+    });
+  } catch (err) {
+    console.error('[deep-review/cancelar] ERROR:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 

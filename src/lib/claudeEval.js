@@ -99,8 +99,24 @@ export async function listarPendientes() {
   return data.pendientes;
 }
 
+/**
+ * Quita la revisión de la lista. El lote NO se detiene: sigue procesándose y
+ * sigue cobrándose. Para detenerlo está cancelarRevision().
+ */
 export async function descartarPendiente(batchId) {
   await fetch(`/api/deep-review/pendientes?batchId=${encodeURIComponent(batchId)}`, { method: 'DELETE' });
+}
+
+/** Detiene el lote en la API para que deje de consumir saldo. */
+export async function cancelarRevision(batchId) {
+  const res = await fetch('/api/deep-review/cancelar', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ batchId }),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error ?? 'No se pudo cancelar el lote.');
+  return data;
 }
 
 async function esperarYConsolidar({ batchId, plan, totalTandas, onProgress, shouldCancel }) {

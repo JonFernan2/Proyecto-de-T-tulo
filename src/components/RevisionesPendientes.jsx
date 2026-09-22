@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useGradingStore } from '../store/useGradingStore.js';
-import { listarPendientes, descartarPendiente, cargarResultado } from '../lib/claudeEval.js';
+import { listarPendientes, descartarPendiente, cargarResultado, cancelarRevision } from '../lib/claudeEval.js';
 
 const ESTADOS = {
   in_progress: { texto: 'en proceso', clase: 'text-blue-600' },
@@ -22,6 +22,8 @@ export default function RevisionesPendientes() {
   const { setDelivery, setStudentName, goTo, abrirResultado } = useGradingStore();
   const [revisiones, setRevisiones] = useState([]);
   const [abriendo, setAbriendo] = useState(null);
+  const [cancelando, setCancelando] = useState(null);
+  const [porCancelar, setPorCancelar] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
@@ -63,6 +65,24 @@ export default function RevisionesPendientes() {
   async function descartar(batchId) {
     await descartarPendiente(batchId);
     setRevisiones(rs => rs.filter(r => r.batchId !== batchId));
+  }
+
+  // Detener el lote de verdad, para que deje de consumir saldo.
+  async function cancelar(p) {
+    setCancelando(p.batchId);
+    setError(null);
+    try {
+      const r = await cancelarRevision(p.batchId);
+      setRevisiones(rs => rs.filter(x => x.batchId !== p.batchId));
+      setError(
+        `Lote de ${p.studentName} cancelado. ${r.completadas} tanda(s) alcanzaron a completarse ` +
+        'y sí se cobran; el resto no. Para volver a revisarlo hay que lanzarlo de nuevo.',
+      );
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setCancelando(null);
+    }
   }
 
   return (
@@ -161,22 +181,63 @@ export default function RevisionesPendientes() {
                         Retomar
                       </button>
                     )}
+                    {p.estado === 'in_progress' && (
+                      <button
+                        onClick={() => setPorCancelar(p.batchId)}
+                        disabled={cancelando === p.batchId}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-red-700 border border-red-300 hover:bg-red-50 disabled:opacity-50"
+                        title="Detener el lote para que deje de consumir saldo"
+                      >
+                        {cancelando === p.batchId ? 'Cancelando…' : 'Cancelar'}
+                      </button>
+                    )}
                     <button
                       onClick={() => descartar(p.batchId)}
-                      className="text-xs text-slate-400 hover:text-red-600"
-                      title="Descartar sin recoger"
+                      className="text-xs text-slate-400 hover:text-slate-700"
+                      title="Quitar de esta lista. El lote SIGUE corriendo y se sigue cobrando."
                     >
                       ✕
                     </button>
                   </div>
                 </div>
+
+                {porCancelar === p.batchId && (
+                  <div className="mt-2.5 text-xs text-red-900 bg-red-50 border border-red-200 rounded-lg px-3 py-2 space-y-2">
+                    <div className="leading-relaxed">
+                      Se detiene el lote de <span className="font-semibold">{p.studentName}</span> y
+                      deja de consumir saldo. Las tandas que ya se completaron se cobran igual y se
+                      pierden: volver a revisarlo significa lanzarlo entero de nuevo.
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => { setPorCancelar(null); cancelar(p); }}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-red-600 hover:bg-red-700"
+                      >
+                        Sí, detener el lote
+                      </button>
+                      <button
+                        onClick={() => setPorCancelar(null)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 bg-white border border-slate-300 hover:bg-slate-50"
+                      >
+                        Volver
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
 
+          {error && (
+            <div className="text-xs text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2">
+              {error}
+            </div>
+          )}
+
           <div className="text-xs text-blue-700 leading-relaxed">
-            Estas revisiones ya están pagadas y siguen procesándose aunque cierres la aplicación.
-            Retómalas en vez de lanzarlas otra vez.
+            Estas revisiones siguen procesándose aunque cierres la aplicación: retómalas en vez de
+            lanzarlas otra vez. «Cancelar» detiene el lote y deja de consumir saldo; la ✕ solo lo
+            quita de esta lista y el lote sigue corriendo.
           </div>
         </div>
       )}
