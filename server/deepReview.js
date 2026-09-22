@@ -59,7 +59,7 @@ export const BATCH_FINDINGS_TOOL = {
  * `plan` describe qué se va a revisar, para mostrarlo en pantalla.
  */
 export function buildDeepReviewRequests({ delivery, studentName, model, rubric, listadoText, referencias = '', payload }) {
-  const { cubicaciones, cotizaciones, apu } = payload;
+  const { cubicaciones, cotizaciones, apu, listado } = payload;
   const requests = [];
   const plan = [];
 
@@ -82,12 +82,14 @@ export function buildDeepReviewRequests({ delivery, studentName, model, rubric, 
     plan.push({ kind, sheets: sheets.length, batches: chunks.length });
   };
 
-  // Se descarta ÚNICAMENTE la hoja que se usa como listado (la primera que
-  // coincide), no toda hoja cuyo nombre contenga "partida" o "actividad":
-  // los libros suelen nombrar sus hojas "1.1 PARTIDAS PRELIMINARES" y un
-  // filtro por nombre sobre todas las hojas dejaría la revisión vacía.
+  // Si el listado vino como archivo aparte, el libro de cubicaciones se revisa
+  // entero. Solo cuando el listado vive DENTRO de ese libro hay que apartar su
+  // hoja — y únicamente esa: los libros nombran sus hojas "1.1 PARTIDAS
+  // PRELIMINARES", y filtrar por nombre sobre todas dejaría la revisión vacía.
   const todasCub = cubicaciones?.sheets ?? [];
-  const idxListado = todasCub.findIndex(s => esHojaListado(s.name));
+  const idxListado = listado?.sheets?.length
+    ? -1
+    : todasCub.findIndex(s => esHojaListado(s.name));
   const cubSheets = todasCub.filter((_, i) => i !== idxListado);
   push('cub', cubSheets, CHUNK_CUBICACIONES, INSTRUCCIONES_CUBICACIONES);
 

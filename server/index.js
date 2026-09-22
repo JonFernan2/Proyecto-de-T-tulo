@@ -10,7 +10,7 @@ import { cargarReferencias, reportarReferencias } from './referencias.js';
 
 const app = express();
 app.use(cors({ origin: 'http://localhost:5173' }));
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '500mb' }));
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-sonnet-5';
@@ -184,7 +184,7 @@ app.post('/api/deep-review/start', async (req, res) => {
   try {
     const { delivery, studentName, payload } = req.body;
 
-    const { listadoText } = splitListadoYCubicaciones(payload.cubicaciones);
+    const { listadoText } = splitListadoYCubicaciones(payload.cubicaciones, payload.listado);
 
     const { requests, plan } = buildDeepReviewRequests({
       delivery,
@@ -411,7 +411,7 @@ Todo en voz impersonal, sin mencionar sistemas, herramientas ni IA.`;
 }
 
 function buildUserContent(delivery, studentName, payload) {
-  const { eett, cubicaciones, cotizaciones, cotizacionesFiles, apu, pdfNames, admissibility } = payload;
+  const { eett, cubicaciones, listado, cotizaciones, cotizacionesFiles, apu, pdfNames, admissibility } = payload;
 
   const contentBlocks = [];
 
@@ -432,7 +432,7 @@ La sección LISTADO es la referencia base para la evaluación cruzada.\n\n`;
 
     // ── SECCIÓN 2 y 3: Separar listado de cubicaciones ───────────────────────
     const { listadoText, cubicacionesText, nListado, nCubSheets } =
-      splitListadoYCubicaciones(cubicaciones);
+      splitListadoYCubicaciones(cubicaciones, listado);
 
     text += `<seccion id="listado" documento="Listado de Actividades" n_actividades="${nListado}">\n`;
     text += `ESTE ES EL LISTADO DE ACTIVIDADES — referencia base para la evaluación cruzada.\n`;
@@ -472,7 +472,7 @@ La sección LISTADO es la referencia base para la evaluación cruzada.\n\n`;
     text += `</seccion>\n\n`;
 
     const { listadoText, cubicacionesText, nListado, nCubSheets } =
-      splitListadoYCubicaciones(cubicaciones);
+      splitListadoYCubicaciones(cubicaciones, listado);
 
     text += `<seccion id="listado" documento="Listado de Actividades E1" n_actividades="${nListado}">\n`;
     text += listadoText;
@@ -556,7 +556,29 @@ function formatHechos(admissibility, files) {
 }
 
 // ─── Separar listado del resto de cubicaciones ────────────────────────────────
-function splitListadoYCubicaciones(cubicacionesData) {
+function splitListadoYCubicaciones(cubicacionesData, listadoData) {
+  // El listado entregado como archivo propio manda: el libro de cubicaciones
+  // se revisa entero y no se aparta ninguna de sus hojas.
+  if (listadoData?.sheets?.length) {
+    let listadoText = '';
+    let nListado = 0;
+    for (const hoja of listadoData.sheets) {
+      listadoText += `Hoja: "${hoja.name}" — ${hoja.rows.length} filas\n\n`;
+      hoja.rows.slice(0, 400).forEach(row => {
+        const cells = row.map(c => (!c ? '' : String(c.value ?? ''))).filter(Boolean);
+        if (cells.length) { listadoText += cells.join(' | ') + '\n'; nListado++; }
+      });
+      if (hoja.rows.length > 400) listadoText += `... (${hoja.rows.length - 400} filas más)\n`;
+      listadoText += '\n';
+    }
+    return {
+      listadoText,
+      cubicacionesText: formatCubSheets(cubicacionesData?.sheets ?? []),
+      nListado,
+      nCubSheets: cubicacionesData?.sheets?.length ?? 0,
+    };
+  }
+
   if (!cubicacionesData?.sheets?.length) {
     return { listadoText: '_(No entregado)_\n', cubicacionesText: '_(No entregado)_\n', nListado: 0, nCubSheets: 0 };
   }
@@ -589,13 +611,20 @@ function splitListadoYCubicaciones(cubicacionesData) {
     });
   }
 
-  // Formatear cubicaciones (sin la hoja listado)
-  let cubicacionesText = '';
+  return {
+    listadoText,
+    cubicacionesText: formatCubSheets(cubSheets),
+    nListado,
+    nCubSheets: cubSheets.length,
+  };
+}
+
+function formatCubSheets(cubSheets) {
+  let out = `Total hojas de cubicaciones: ${cubSheets.length}\n`;
   const sheetsToShow = cubSheets.slice(0, 20);
-  cubicacionesText += `Total hojas de cubicaciones: ${cubSheets.length}\n`;
-  cubicacionesText += `(Se muestran las primeras ${sheetsToShow.length} hojas)\n\n`;
+  out += `(Se muestran las primeras ${sheetsToShow.length} hojas)\n\n`;
   sheetsToShow.forEach(sheet => {
-    cubicacionesText += `**Hoja: ${sheet.name}**\n`;
+    out += `**Hoja: ${sheet.name}**\n`;
     sheet.rows.slice(0, 60).forEach(row => {
       const cells = row.map(c => {
         if (!c) return '';
@@ -603,14 +632,13 @@ function splitListadoYCubicaciones(cubicacionesData) {
         if (c.formula) val += ` [fórmula: ${c.formula}]`;
         return val;
       }).filter(Boolean);
-      if (cells.length) cubicacionesText += cells.join(' | ') + '\n';
+      if (cells.length) out += cells.join(' | ') + '\n';
     });
-    if (sheet.rows.length > 60) cubicacionesText += `... (${sheet.rows.length - 60} filas más)\n`;
-    cubicacionesText += '\n';
+    if (sheet.rows.length > 60) out += `... (${sheet.rows.length - 60} filas más)\n`;
+    out += '\n';
   });
-  if (cubSheets.length > 20) cubicacionesText += `[... ${cubSheets.length - 20} hojas más no mostradas]\n`;
-
-  return { listadoText, cubicacionesText, nListado, nCubSheets: cubSheets.length };
+  if (cubSheets.length > 20) out += `[... ${cubSheets.length - 20} hojas más no mostradas]\n`;
+  return out;
 }
 
 // ─── Rubric text ──────────────────────────────────────────────────────────────

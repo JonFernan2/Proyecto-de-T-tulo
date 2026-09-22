@@ -44,22 +44,39 @@ export const useGradingStore = create((set, get) => ({
     }));
   },
 
-  // Build filesMap: { eett, cubicaciones, cotizaciones, cotizacionesFiles, apu, ... }
+  // Build filesMap: { eett, listado, cubicaciones, cotizaciones, ... }
   //
-  // Files of the same role are picked by CONTENT, not by upload order: a role
-  // holding a PDF plus an Excel must still surface the Excel as the sheet
-  // source, otherwise admissibility wrongly reports the file as missing.
+  // Dos reglas que importan:
+  //  - Los archivos de un rol se eligen por CONTENIDO, no por orden de subida:
+  //    un rol con un PDF y un Excel debe exponer el Excel como fuente de hojas.
+  //  - Varios Excel en el mismo rol se FUSIONAN. Un estudiante puede partir sus
+  //    cubicaciones en dos libros, y quedarse con el primero perdería el resto.
   getFilesMap() {
     const files = get().uploadedFiles;
     const ext = f => f.file.name.split('.').pop().toLowerCase();
-
     const ofRole = role => files.filter(f => f.role === role);
-    const excelOf = role => ofRole(role).find(f => f.parsed?.sheets?.length)?.parsed ?? null;
+
+    const mergeExcel = role => {
+      const libros = ofRole(role).filter(f => f.parsed?.sheets?.length);
+      if (!libros.length) return null;
+      if (libros.length === 1) return libros[0].parsed;
+
+      // Al fusionar se antepone el nombre del libro a cada hoja, para que en la
+      // revisión se sepa de cuál viene cada una.
+      return {
+        sheets: libros.flatMap(f => {
+          const libro = f.file.name.replace(/\.[^.]+$/, '');
+          return f.parsed.sheets.map(s => ({ ...s, name: `${libro} › ${s.name}` }));
+        }),
+        totalRows: libros.reduce((sum, f) => sum + (f.parsed.totalRows ?? 0), 0),
+        fuentes: libros.map(f => f.file.name),
+      };
+    };
+
     const textOf = role => ofRole(role).find(f => f.parsed?.text !== undefined)?.parsed ?? null;
     const namesOf = (role, exts) =>
       ofRole(role).filter(f => exts.includes(ext(f))).map(f => f.file.name);
 
-    // Cotizaciones may arrive as Excel, Word, or a pile of PDFs — keep all three.
     const cotEntries = ofRole('cotizaciones').map(f => ({
       name: f.file.name,
       ext: ext(f),
@@ -67,17 +84,22 @@ export const useGradingStore = create((set, get) => ({
     }));
 
     return {
-      eett: excelOf('eett') ?? textOf('eett'),
+      eett: mergeExcel('eett') ?? textOf('eett'),
       eettName: ofRole('eett')[0]?.file.name ?? null,
 
-      cubicaciones: excelOf('cubicaciones'),
-      cubicacionesName: ofRole('cubicaciones')[0]?.file.name ?? null,
+      // El listado puede venir como archivo aparte o dentro del libro de
+      // cubicaciones; si no hay archivo propio, queda null y se busca adentro.
+      listado: mergeExcel('listado'),
+      listadoName: ofRole('listado')[0]?.file.name ?? null,
 
-      cotizaciones: excelOf('cotizaciones'),
+      cubicaciones: mergeExcel('cubicaciones'),
+      cubicacionesName: ofRole('cubicaciones').map(f => f.file.name).join(' + ') || null,
+
+      cotizaciones: mergeExcel('cotizaciones'),
       cotizacionesFiles: cotEntries,
       cotizacionesPdfNames: namesOf('cotizaciones', ['pdf']),
 
-      apu: excelOf('apu'),
+      apu: mergeExcel('apu'),
 
       respaldoPdfNames: [
         ...namesOf('respaldo', ['pdf']),

@@ -6,7 +6,8 @@ import { parseExcel, parseWord, parsePdf, parseImage, detectStudentName } from '
 
 const ROLE_OPTIONS_E1 = [
   { value: 'eett', label: 'EETT (Word / PDF)' },
-  { value: 'cubicaciones', label: 'Listado + Cubicaciones' },
+  { value: 'listado', label: 'Listado / Itemizado' },
+  { value: 'cubicaciones', label: 'Cubicaciones' },
   { value: 'cotizaciones', label: 'Cotizaciones' },
   { value: 'respaldo', label: 'Respaldo PDF (cotizaciones)' },
   { value: 'imagen', label: 'Imagen (respaldo cubicaciones)' },
@@ -14,7 +15,8 @@ const ROLE_OPTIONS_E1 = [
 
 const ROLE_OPTIONS_E2 = [
   { value: 'eett', label: 'EETT (Word / PDF)' },
-  { value: 'cubicaciones', label: 'Listado + Cubicaciones E1' },
+  { value: 'listado', label: 'Listado / Itemizado E1' },
+  { value: 'cubicaciones', label: 'Cubicaciones E1' },
   { value: 'cotizaciones', label: 'Cotizaciones E1' },
   { value: 'apu', label: 'APU — Cartillas (Anexo 01)' },
 ];
@@ -33,10 +35,12 @@ function guessRole(file, delivery) {
   }
   if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) return 'imagen';
   if (ext === 'xlsx' || ext === 'xls') {
-    if (/apu|analisis|precios|unitarios|cartilla/.test(name)) return 'apu';
-    if (/listado|cubic|itemizado|partidas/.test(name)) return 'cubicaciones';
-    // Solo asignar cotizaciones si no tiene palabras de cubicaciones
-    if (/cotiz|cot_|proveedor/.test(name) && !/cubic|listado/.test(name)) return 'cotizaciones';
+    if (/apu|analisis|análisis|precios|unitarios|cartilla/.test(name)) return 'apu';
+    // "cubica" gana sobre "itemizado": un libro llamado "LISTADO Y CUBICACIONES"
+    // trae ambas cosas y debe revisarse como cubicaciones.
+    if (/cubica/.test(name)) return 'cubicaciones';
+    if (/itemizado|listado|partidas/.test(name)) return 'listado';
+    if (/cotiz|cot_|proveedor/.test(name)) return 'cotizaciones';
     return 'cubicaciones';
   }
   return 'respaldo';

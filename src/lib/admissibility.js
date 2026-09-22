@@ -16,7 +16,8 @@ export function runAdmissibility(delivery, filesMap) {
   const results = [];
 
   // ── Cross-reference baseline ────────────────────────────────────────────────
-  const nItems = countListadoItems(filesMap.cubicaciones);
+  // El listado puede venir como archivo propio o dentro del libro de cubicaciones.
+  const nItems = countListadoItems(filesMap.listado ?? filesMap.cubicaciones);
 
   // ── EETT ────────────────────────────────────────────────────────────────────
   results.push(checkEett(filesMap.eett));

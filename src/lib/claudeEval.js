@@ -104,6 +104,7 @@ function buildPayload({ filesMap, admissibility }) {
         }
       : null,
     cubicaciones: filesMap.cubicaciones ?? null,
+    listado: filesMap.listado ?? null,
     cotizaciones: filesMap.cotizaciones ?? null,
     cotizacionesFiles: (filesMap.cotizacionesFiles ?? []).map(f => ({
       name: f.name,
