@@ -1,13 +1,20 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useGradingStore } from '../store/useGradingStore.js';
 import { runAdmissibility } from '../lib/admissibility.js';
 import { generateFeedbackPDF } from '../lib/pdfExport.js';
+import { adoptarRevision } from '../lib/claudeEval.js';
 
 export default function Step3_Admissibility() {
   const {
     delivery, studentName, admissibility, setAdmissibility, goTo,
     getFilesMap, uploadedFiles,
   } = useGradingStore();
+
+  const [recuperar, setRecuperar] = useState(false);
+  const [loteId, setLoteId] = useState('');
+  const [adoptando, setAdoptando] = useState(false);
+  const [aviso, setAviso] = useState(null);
+  const [descuadre, setDescuadre] = useState(null);
 
   useEffect(() => {
     if (admissibility) return;
@@ -41,6 +48,45 @@ export default function Step3_Admissibility() {
       globalJustification: `Entrega rechazada por no cumplir los criterios de admisibilidad. Motivos: ${results.filter(r => !r.passed).map(r => r.label).join('; ')}.`,
       globalObservation: 'Nota mínima 1,0 por incumplimiento de admisibilidad.',
     });
+  }
+
+  // Readoptar un lote ya lanzado: se reconstruye el contexto con estos archivos
+  // y se consolida sin reenviar las tandas.
+  //
+  // Si los conteos no cuadran se avisa pero no se bloquea: el número de tandas
+  // depende de cómo se partieron las hojas, y un lote lanzado con una versión
+  // anterior puede dar otro número con los mismos archivos. Quien sabe si son
+  // los del estudiante es el docente.
+  async function adoptar({ aunqueNoCuadre = false } = {}) {
+    setAdoptando(true);
+    setAviso(null);
+    try {
+      const r = await adoptarRevision({
+        batchId: loteId, delivery, studentName,
+        filesMap: getFilesMap(), admissibility,
+      });
+
+      if (!r.coincide && !r.yaConsolidada && !aunqueNoCuadre) {
+        setDescuadre(
+          `El lote tiene ${r.tandasEnElLote} tanda(s) y estos archivos dan ${r.tandasSegunArchivos}. ` +
+          'Puede ser que no sean los archivos con los que se lanzó —y entonces la evaluación ' +
+          'describiría otra entrega— o que el lote se haya lanzado con una versión anterior, ' +
+          'que partía las hojas de otra manera. Confirma que son los de este estudiante.',
+        );
+        setAdoptando(false);
+        return;
+      }
+
+      useGradingStore.setState({
+        revisionPendiente: {
+          batchId: r.batchId, plan: r.plan, totalTandas: r.totalTandas, admissibility,
+        },
+      });
+      goTo('evaluating');
+    } catch (err) {
+      setAviso(err.message);
+      setAdoptando(false);
+    }
   }
 
   return (
@@ -142,6 +188,76 @@ export default function Step3_Admissibility() {
           Evaluar entrega →
         </button>
       </div>
+
+      {/* Recuperar un lote ya lanzado. Los resultados de una revisión viven 29
+          días del lado de la API: si el registro se perdió, se readopta con
+          estos archivos y se consolida sin reenviar ni volver a pagar. */}
+      {!recuperar ? (
+        <div className="text-center">
+          <button
+            onClick={() => setRecuperar(true)}
+            className="text-xs text-slate-500 hover:text-uvm-blue underline underline-offset-2"
+          >
+            Esta revisión ya se lanzó antes — recuperarla con su ID de lote
+          </button>
+        </div>
+      ) : (
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+          <div>
+            <div className="text-sm font-bold text-slate-800">Recuperar una revisión ya lanzada</div>
+            <div className="text-xs text-slate-600 mt-0.5 leading-relaxed">
+              Pega el identificador del lote (empieza con <span className="font-mono">msgbatch_</span>).
+              Se consolida con los archivos cargados aquí, sin reenviar las tandas ni volver a
+              pagarlas. El lote debe ser de los últimos 29 días.
+            </div>
+          </div>
+
+          <input
+            type="text"
+            value={loteId}
+            onChange={e => setLoteId(e.target.value)}
+            placeholder="msgbatch_..."
+            spellCheck={false}
+            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm font-mono bg-white
+              focus:outline-none focus:ring-2 focus:ring-uvm-blue focus:border-transparent"
+          />
+
+          {aviso && (
+            <div className="text-xs text-red-800 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              {aviso}
+            </div>
+          )}
+
+          {descuadre && (
+            <div className="text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 space-y-2">
+              <div className="leading-relaxed">{descuadre}</div>
+              <button
+                onClick={() => { setDescuadre(null); adoptar({ aunqueNoCuadre: true }); }}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700"
+              >
+                Son los de este estudiante — continuar
+              </button>
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <button
+              onClick={() => adoptar()}
+              disabled={adoptando || loteId.trim().length < 10}
+              className="flex-1 py-2 rounded-lg text-sm font-semibold text-white bg-uvm-blue
+                hover:bg-blue-800 disabled:bg-slate-300 disabled:cursor-not-allowed"
+            >
+              {adoptando ? 'Buscando el lote…' : 'Recuperar y consolidar'}
+            </button>
+            <button
+              onClick={() => { setRecuperar(false); setAviso(null); setDescuadre(null); }}
+              className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 bg-white border border-slate-300 hover:bg-slate-50"
+            >
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

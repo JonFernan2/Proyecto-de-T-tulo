@@ -55,6 +55,26 @@ export async function lanzarRevision({ delivery, studentName, filesMap, admissib
   return { batchId: data.batchId, totalTandas: data.totalTandas, plan: data.plan };
 }
 
+/**
+ * Readopta un lote ya lanzado cuyo registro se perdió.
+ *
+ * El lote sigue del lado de la API y sus resultados viven 29 días. Con los
+ * archivos del estudiante se reconstruye el contexto y se consolida sin
+ * reenviar las tandas: una sola llamada en vez de todas otra vez.
+ */
+export async function adoptarRevision({ batchId, delivery, studentName, filesMap, admissibility }) {
+  const payload = buildPayload({ filesMap, admissibility });
+
+  const res = await fetch('/api/deep-review/adoptar', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ batchId: batchId.trim(), delivery, studentName, payload }),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error ?? 'No se pudo recuperar el lote.');
+  return data;
+}
+
 /** Recupera una evaluación ya consolidada, sin volver a correr ni pagar nada. */
 export async function cargarResultado(batchId) {
   const res = await fetch(`/api/deep-review/resultado?batchId=${encodeURIComponent(batchId)}`);

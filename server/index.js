@@ -240,6 +240,73 @@ app.get('/api/deep-review/pendientes', async (_req, res) => {
   }
 });
 
+// Readoptar un lote cuyo registro se perdió: el servidor olvidó a qué
+// estudiante correspondía, pero el lote sigue del lado de la API y sus
+// resultados viven 29 días. Con los archivos del estudiante se reconstruye el
+// contexto y se consolida sin volver a enviar las tandas — una sola llamada en
+// vez de todas otra vez.
+app.post('/api/deep-review/adoptar', async (req, res) => {
+  try {
+    const { batchId, delivery, studentName, payload } = req.body;
+    if (!batchId) return res.status(400).json({ ok: false, error: 'Falta el ID del lote.' });
+
+    const ya = revisiones.get(batchId);
+    if (ya?.estado === 'completada') {
+      return res.json({ ok: true, batchId, yaConsolidada: true, totalTandas: 0, plan: ya.plan ?? [] });
+    }
+
+    let batch;
+    try {
+      batch = await anthropic.messages.batches.retrieve(batchId);
+    } catch {
+      return res.status(404).json({
+        ok: false,
+        error: `No existe el lote ${batchId} en esta cuenta de Anthropic. `
+             + 'Revisa el identificador en console.anthropic.com.',
+      });
+    }
+
+    // El plan se reconstruye a partir de los archivos, sin enviar nada: sirve
+    // para mostrar el alcance y para avisar si los archivos no son los mismos
+    // con los que se lanzó el lote.
+    const { listadoText } = splitListadoYCubicaciones(payload.cubicaciones, payload.listado);
+    const { requests, plan } = buildDeepReviewRequests({
+      delivery,
+      studentName,
+      model: MODEL,
+      rubric: getRubric(delivery),
+      listadoText,
+      referencias: cargarReferencias().texto,
+      payload,
+    });
+
+    const c = batch.request_counts ?? {};
+    const totalLote = (c.processing ?? 0) + (c.succeeded ?? 0) + (c.errored ?? 0)
+                    + (c.canceled ?? 0) + (c.expired ?? 0);
+
+    const ctx = { delivery, studentName, payload, plan, creado: Date.now() };
+    revisiones.set(batchId, ctx);
+    guardarRevision(batchId, ctx);
+
+    console.log(`[deep-review] ${studentName}: lote ${batchId} readoptado · ${totalLote} tandas en la API`);
+    res.json({
+      ok: true,
+      batchId,
+      plan,
+      totalTandas: totalLote || requests.length,
+      estado: batch.processing_status,
+      // Si no cuadran, los archivos cargados no son los del lote: la
+      // consolidación saldría describiendo otra entrega.
+      coincide: totalLote === requests.length,
+      tandasEnElLote: totalLote,
+      tandasSegunArchivos: requests.length,
+    });
+  } catch (err) {
+    console.error('[deep-review/adoptar] ERROR:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Recuperar la evaluación de una revisión ya consolidada, para repasarla,
 // ajustar notas y exportar sin volver a correr ni pagar nada.
 app.get('/api/deep-review/resultado', (req, res) => {
