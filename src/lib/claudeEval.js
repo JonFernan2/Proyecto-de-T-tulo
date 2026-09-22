@@ -35,6 +35,35 @@ export async function deepReview({ delivery, studentName, filesMap, admissibilit
 }
 
 /**
+ * Lanza las tandas y devuelve de inmediato, sin esperar a que terminen.
+ *
+ * Es lo que permite revisar un curso completo: se lanzan todos los estudiantes
+ * seguidos y se recogen después. Los lotes se procesan en paralelo del lado de
+ * la API, así que veinte revisiones tardan más o menos lo mismo que una.
+ */
+export async function lanzarRevision({ delivery, studentName, filesMap, admissibility }) {
+  const payload = buildPayload({ filesMap, admissibility });
+
+  const res = await fetch('/api/deep-review/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ delivery, studentName, payload }),
+  });
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error ?? 'No se pudo iniciar la revisión.');
+
+  return { batchId: data.batchId, totalTandas: data.totalTandas, plan: data.plan };
+}
+
+/** Recupera una evaluación ya consolidada, sin volver a correr ni pagar nada. */
+export async function cargarResultado(batchId) {
+  const res = await fetch(`/api/deep-review/resultado?batchId=${encodeURIComponent(batchId)}`);
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error ?? 'No se pudo recuperar el resultado.');
+  return data;
+}
+
+/**
  * Retoma una revisión ya lanzada. El lote sigue procesándose del lado de la API
  * aunque se cierre el navegador, así que relanzarla sería pagarla dos veces.
  */

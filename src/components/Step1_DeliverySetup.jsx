@@ -5,7 +5,10 @@ import RevisionesPendientes from './RevisionesPendientes.jsx';
 
 export default function Step1_DeliverySetup() {
   const { delivery, setDelivery, studentName, setStudentName, goTo } = useGradingStore();
-  const canContinue = delivery && studentName.trim().length > 2;
+  // Basta con elegir la entrega: el nombre se detecta de la carpeta al subir los
+  // archivos, y para revisar el curso completo no hay un solo estudiante que
+  // nombrar.
+  const canContinue = Boolean(delivery);
 
   return (
     <div className="space-y-6">
@@ -42,7 +45,7 @@ export default function Step1_DeliverySetup() {
       {/* Student name */}
       <div>
         <label className="block text-sm font-semibold text-slate-700 mb-2">
-          Nombre del estudiante
+          Nombre del estudiante <span className="font-normal text-slate-400">(opcional)</span>
         </label>
         <input
           type="text"
@@ -52,7 +55,8 @@ export default function Step1_DeliverySetup() {
           className="w-full border border-slate-300 rounded-lg px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-uvm-blue focus:border-transparent"
         />
         <p className="text-xs text-slate-400 mt-1">
-          Al subir archivos, la app intentará detectar el nombre automáticamente. Puedes editarlo aquí.
+          Se detecta solo del nombre de la carpeta al subir los archivos. Déjalo en blanco
+          si vas a seleccionar la carpeta del curso completo.
         </p>
       </div>
 

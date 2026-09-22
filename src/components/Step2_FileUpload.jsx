@@ -3,6 +3,8 @@ import { useDropzone } from 'react-dropzone';
 import { useGradingStore } from '../store/useGradingStore.js';
 import { DELIVERIES } from '../lib/rubric.js';
 import { parseExcel, parseWord, parsePdf, parseImage, detectStudentName } from '../lib/fileParser.js';
+import { guessRole } from '../lib/roles.js';
+import LanzadorCurso from './LanzadorCurso.jsx';
 
 const ROLE_OPTIONS_E1 = [
   { value: 'eett', label: 'EETT (Word / PDF)' },
@@ -20,31 +22,6 @@ const ROLE_OPTIONS_E2 = [
   { value: 'cotizaciones', label: 'Cotizaciones E1' },
   { value: 'apu', label: 'APU — Cartillas (Anexo 01)' },
 ];
-
-function guessRole(file, delivery) {
-  const name = file.name.toLowerCase();
-  const ext = name.split('.').pop();
-
-  if (ext === 'docx' || ext === 'doc') {
-    if (/cotiz|cot_|proveedor|presupuesto/.test(name)) return 'cotizaciones';
-    return 'eett';
-  }
-  if (ext === 'pdf') {
-    if (/eett|especificaci|et_|_et_|tecnica/.test(name)) return 'eett';
-    return 'respaldo';
-  }
-  if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) return 'imagen';
-  if (ext === 'xlsx' || ext === 'xls') {
-    if (/apu|analisis|análisis|precios|unitarios|cartilla/.test(name)) return 'apu';
-    // "cubica" gana sobre "itemizado": un libro llamado "LISTADO Y CUBICACIONES"
-    // trae ambas cosas y debe revisarse como cubicaciones.
-    if (/cubica/.test(name)) return 'cubicaciones';
-    if (/itemizado|listado|partidas/.test(name)) return 'listado';
-    if (/cotiz|cot_|proveedor/.test(name)) return 'cotizaciones';
-    return 'cubicaciones';
-  }
-  return 'respaldo';
-}
 
 /**
  * Agrupa los archivos por carpeta de estudiante cuando se eligió la carpeta del
@@ -77,6 +54,7 @@ export default function Step2_FileUpload() {
   const [parsing, setParsing] = useState({});  // { fileId: true }
   const carpetaRef = useRef(null);
   const [carpetas, setCarpetas] = useState(null);  // curso completo detectado
+  const [modoCurso, setModoCurso] = useState(false);
   const expectedFiles = DELIVERIES[delivery]?.expectedFiles ?? [];
   const roleOptions = delivery === 'E2' ? ROLE_OPTIONS_E2 : ROLE_OPTIONS_E1;
 
@@ -107,6 +85,7 @@ export default function Step2_FileUpload() {
 
   const cargar = useCallback((archivos) => {
     setCarpetas(null);
+    setModoCurso(false);
 
     const newEntries = archivos.map(f => ({
       id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
@@ -140,6 +119,7 @@ export default function Step2_FileUpload() {
     const porCarpeta = agruparPorEstudiante(acceptedFiles);
     if (porCarpeta && porCarpeta.size > 1) {
       setCarpetas(porCarpeta);
+      setModoCurso(false);
       return;
     }
 
@@ -152,17 +132,38 @@ export default function Step2_FileUpload() {
   const coveredRoles = new Set(uploadedFiles.map(f => f.role));
   const missingRequired = requiredRoles.filter(r => !coveredRoles.has(r));
   const allParsed = Object.keys(parsing).length === 0;
-  const canContinue = missingRequired.length === 0 && allParsed && uploadedFiles.length > 0;
+  // El nombre ya no se exige en el paso anterior —el curso completo no tiene
+  // uno— así que se comprueba aquí, que es donde empieza a hacer falta.
+  const sinNombre = studentName.trim().length < 3;
+  const canContinue = missingRequired.length === 0 && allParsed && uploadedFiles.length > 0 && !sinNombre;
 
   return (
     <div className="space-y-5">
       <div>
         <h2 className="text-xl font-bold text-slate-800 mb-1">Subir archivos del estudiante</h2>
         <p className="text-sm text-slate-500">
-          Entrega: <span className="font-semibold text-uvm-blue">{DELIVERIES[delivery]?.label}</span> ·
-          Estudiante: <span className="font-semibold">{studentName}</span>
+          Entrega: <span className="font-semibold text-uvm-blue">{DELIVERIES[delivery]?.label}</span>
+          {studentName && <> · Estudiante: <span className="font-semibold">{studentName}</span></>}
         </p>
       </div>
+
+      {/* El nombre se detecta de la carpeta, pero no siempre: sin él el informe
+          sale sin destinatario. */}
+      {uploadedFiles.length > 0 && sinNombre && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-2">
+          <div className="text-xs font-semibold text-amber-800">
+            No se pudo detectar el nombre del estudiante
+          </div>
+          <input
+            type="text"
+            value={studentName}
+            onChange={e => setStudentName(e.target.value)}
+            placeholder="Apellido Nombre"
+            className="w-full border border-amber-300 rounded-lg px-3 py-2 text-sm bg-white
+              focus:outline-none focus:ring-2 focus:ring-uvm-blue focus:border-transparent"
+          />
+        </div>
+      )}
 
       {/* Expected files checklist */}
       <div className="bg-blue-50 rounded-xl border border-blue-200 p-4">
@@ -186,18 +187,36 @@ export default function Step2_FileUpload() {
         </div>
       </div>
 
-      {/* Se eligió la carpeta del curso: hay que elegir a quién revisar, porque
-          cargarlos todos mezclaría a los estudiantes en una sola corrección. */}
-      {carpetas && (
+      {/* Se eligió la carpeta del curso: o se revisa a uno, o se lanzan todos.
+          Cargarlos todos juntos en una corrección mezclaría a los estudiantes. */}
+      {carpetas && modoCurso && (
+        <LanzadorCurso
+          carpetas={carpetas}
+          delivery={delivery}
+          onCancelar={() => setModoCurso(false)}
+          onListo={() => { setCarpetas(null); setModoCurso(false); goTo('setup'); }}
+        />
+      )}
+
+      {carpetas && !modoCurso && (
         <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
           <div>
             <div className="text-sm font-bold text-slate-800">
               Se detectaron {carpetas.size} carpetas de estudiantes
             </div>
             <div className="text-xs text-slate-600 mt-0.5">
-              Las correcciones son de a un estudiante por vez. Elige a quién revisar ahora.
+              Elige a quién revisar ahora, o lanza el curso completo de una vez.
             </div>
           </div>
+
+          <button
+            onClick={() => setModoCurso(true)}
+            className="w-full py-2.5 rounded-lg font-semibold text-white bg-uvm-blue hover:bg-blue-800 text-sm"
+          >
+            Revisar el curso completo · {carpetas.size} estudiantes
+          </button>
+
+          <div className="text-xs text-slate-500 text-center">o revisa a uno solo:</div>
 
           <div className="max-h-72 overflow-y-auto space-y-1.5">
             {[...carpetas.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([alumno, archivos]) => (

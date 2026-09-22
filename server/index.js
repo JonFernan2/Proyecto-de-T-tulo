@@ -8,7 +8,7 @@ import {
 } from './deepReview.js';
 import { cargarReferencias, reportarReferencias } from './referencias.js';
 import {
-  guardarRevision, cargarRevisiones, eliminarRevision, reportarRevisiones,
+  guardarRevision, guardarResultado, cargarRevisiones, eliminarRevision, reportarRevisiones,
 } from './revisiones.js';
 
 const app = express();
@@ -187,8 +187,29 @@ app.post('/api/evaluate', async (req, res) => {
 //    retomarlas en vez de relanzarlas y pagarlas dos veces.
 app.get('/api/deep-review/pendientes', async (_req, res) => {
   try {
-    const pendientes = [];
+    const revs = [];
     for (const [batchId, ctx] of revisiones) {
+      const base = {
+        batchId,
+        studentName: ctx.studentName,
+        delivery: ctx.delivery,
+        plan: ctx.plan,
+        creado: ctx.creado,
+        totalTandas: (ctx.plan ?? []).reduce((n, p) => n + (p.batches ?? 0), 0),
+      };
+
+      // Ya consolidada: no hace falta consultar la API, el resultado está aquí.
+      if (ctx.estado === 'completada') {
+        revs.push({
+          ...base,
+          estado: 'completada',
+          completado: ctx.completado,
+          nota: ctx.evaluation?.globalScore ?? null,
+          cobertura: ctx.cobertura ?? null,
+        });
+        continue;
+      }
+
       let estado = 'desconocido';
       let counts = null;
       try {
@@ -205,23 +226,31 @@ app.get('/api/deep-review/pendientes', async (_req, res) => {
         // pueda descartarse desde la pantalla.
         estado = 'no encontrado';
       }
-      pendientes.push({
-        batchId,
-        studentName: ctx.studentName,
-        delivery: ctx.delivery,
-        plan: ctx.plan,
-        creado: ctx.creado,
-        estado,
-        counts,
-        totalTandas: (ctx.plan ?? []).reduce((n, p) => n + (p.batches ?? 0), 0),
-      });
+      revs.push({ ...base, estado, counts });
     }
-    pendientes.sort((a, b) => b.creado - a.creado);
-    res.json({ ok: true, pendientes });
+
+    revs.sort((a, b) => b.creado - a.creado);
+    res.json({ ok: true, pendientes: revs });
   } catch (err) {
     console.error('[deep-review/pendientes] ERROR:', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+// Recuperar la evaluación de una revisión ya consolidada, para repasarla,
+// ajustar notas y exportar sin volver a correr ni pagar nada.
+app.get('/api/deep-review/resultado', (req, res) => {
+  const ctx = revisiones.get(req.query.batchId);
+  if (ctx?.estado !== 'completada') {
+    return res.status(404).json({ ok: false, error: 'Esa revisión no está consolidada.' });
+  }
+  res.json({
+    ok: true,
+    studentName: ctx.studentName,
+    delivery: ctx.delivery,
+    evaluation: ctx.evaluation,
+    cobertura: ctx.cobertura ?? null,
+  });
 });
 
 // Diagnóstico: por qué falló un lote. Los motivos vienen en los resultados y
@@ -397,6 +426,12 @@ app.post('/api/deep-review/finish', async (req, res) => {
   try {
     const { batchId } = req.body;
     const ctx = revisiones.get(batchId);
+
+    // Ya consolidada: se devuelve lo guardado. Rehacerla costaría de nuevo.
+    if (ctx?.estado === 'completada') {
+      return res.json({ ok: true, evaluation: ctx.evaluation, cobertura: ctx.cobertura });
+    }
+
     if (!ctx) {
       return res.status(404).json({
         ok: false,
@@ -455,14 +490,23 @@ app.post('/api/deep-review/finish', async (req, res) => {
     const toolUse = message.content.find(b => b.type === 'tool_use');
     if (!toolUse) throw new Error('No se pudo consolidar la evaluación final.');
 
-    revisiones.delete(batchId);
-    eliminarRevision(batchId);
+    const cobertura = {
+      ...totales,
+      tandasFallidas: fallidas.length,
+      motivosFallo: [...new Set(fallidas.map(f => f.motivo))].slice(0, 5),
+    };
+
+    guardarResultado(batchId, { evaluation: toolUse.input, cobertura });
+    revisiones.set(batchId, {
+      ...ctx, estado: 'completada', completado: Date.now(),
+      evaluation: toolUse.input, cobertura, payload: { eett: ctx.payload?.eett ?? null },
+    });
 
     console.log(`[deep-review] ${ctx.studentName}: consolidado · ${totales.hojas} hojas · ${totales.errores} con errores`);
     res.json({
       ok: true,
       evaluation: toolUse.input,
-      cobertura: { ...totales, tandasFallidas: fallidas.length, motivosFallo: [...new Set(fallidas.map(f => f.motivo))].slice(0, 5) },
+      cobertura,
     });
   } catch (err) {
     console.error('[deep-review/finish] ERROR:', err.message);

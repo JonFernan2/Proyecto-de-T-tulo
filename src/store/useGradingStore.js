@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { construirFilesMap, extraerImagenes } from '../lib/roles.js';
 
 const STEPS = ['setup', 'upload', 'admissibility', 'evaluating', 'results'];
 
@@ -44,89 +45,18 @@ export const useGradingStore = create((set, get) => ({
     }));
   },
 
-  // Build filesMap: { eett, listado, cubicaciones, cotizaciones, ... }
-  //
-  // Dos reglas que importan:
-  //  - Los archivos de un rol se eligen por CONTENIDO, no por orden de subida:
-  //    un rol con un PDF y un Excel debe exponer el Excel como fuente de hojas.
-  //  - Varios Excel en el mismo rol se FUSIONAN. Un estudiante puede partir sus
-  //    cubicaciones en dos libros, y quedarse con el primero perdería el resto.
+  // El armado del mapa vive en roles.js: la carga de a un estudiante y la del
+  // curso completo deben usar exactamente la misma lógica.
   getFilesMap() {
-    const files = get().uploadedFiles;
-    const ext = f => f.file.name.split('.').pop().toLowerCase();
-    const ofRole = role => files.filter(f => f.role === role);
-
-    const mergeExcel = role => {
-      const libros = ofRole(role).filter(f => f.parsed?.sheets?.length);
-      if (!libros.length) return null;
-      if (libros.length === 1) return libros[0].parsed;
-
-      // Al fusionar se antepone el nombre del libro a cada hoja, para que en la
-      // revisión se sepa de cuál viene cada una.
-      return {
-        sheets: libros.flatMap(f => {
-          const libro = f.file.name.replace(/\.[^.]+$/, '');
-          return f.parsed.sheets.map(s => ({ ...s, name: `${libro} › ${s.name}` }));
-        }),
-        totalRows: libros.reduce((sum, f) => sum + (f.parsed.totalRows ?? 0), 0),
-        fuentes: libros.map(f => f.file.name),
-      };
-    };
-
-    const textOf = role => ofRole(role).find(f => f.parsed?.text !== undefined)?.parsed ?? null;
-    const namesOf = (role, exts) =>
-      ofRole(role).filter(f => exts.includes(ext(f))).map(f => f.file.name);
-
-    const cotEntries = ofRole('cotizaciones').map(f => ({
-      name: f.file.name,
-      ext: ext(f),
-      parsed: f.parsed,
-    }));
-
-    return {
-      eett: mergeExcel('eett') ?? textOf('eett'),
-      eettName: ofRole('eett')[0]?.file.name ?? null,
-
-      // El listado puede venir como archivo aparte o dentro del libro de
-      // cubicaciones; si no hay archivo propio, queda null y se busca adentro.
-      listado: mergeExcel('listado'),
-      listadoName: ofRole('listado')[0]?.file.name ?? null,
-
-      cubicaciones: mergeExcel('cubicaciones'),
-      cubicacionesName: ofRole('cubicaciones').map(f => f.file.name).join(' + ') || null,
-
-      cotizaciones: mergeExcel('cotizaciones'),
-      cotizacionesFiles: cotEntries,
-      cotizacionesPdfNames: namesOf('cotizaciones', ['pdf']),
-
-      // Los PDF de respaldo traen proveedor, precio y año: se cotejan contra la
-      // planilla. Se concatenan las páginas de todos, anotando de qué archivo
-      // viene cada una para poder citarlo.
-      respaldoPdfs: [...ofRole('respaldo'), ...ofRole('cotizaciones')]
-        .filter(f => ext(f) === 'pdf' && f.parsed?.pages)
-        .map(f => ({
-          name: f.file.name,
-          pages: f.parsed.pages,
-          numPages: f.parsed.numPages,
-          escaneado: f.parsed.escaneado,
-          paginasConTexto: f.parsed.paginasConTexto,
-        })),
-
-      apu: mergeExcel('apu'),
-
-      respaldoPdfNames: [
-        ...namesOf('respaldo', ['pdf']),
-        ...namesOf('cotizaciones', ['pdf']),
-      ],
-      imageCount: ofRole('imagen').length,
-    };
+    return construirFilesMap(
+      get().uploadedFiles.map(f => ({ file: f.file, role: f.role, parsed: f.parsed })),
+    );
   },
 
   getImages() {
-    return get().uploadedFiles
-      .filter(f => f.role === 'imagen')
-      .map(f => f.parsed)
-      .filter(Boolean);
+    return extraerImagenes(
+      get().uploadedFiles.map(f => ({ file: f.file, role: f.role, parsed: f.parsed })),
+    );
   },
 
   // ── Admissibility ────────────────────────────────────────────────────────────
@@ -152,6 +82,34 @@ export const useGradingStore = create((set, get) => ({
         [id]: { ...(state.adjustments[id] ?? {}), [field]: value },
       },
     }));
+  },
+
+  /**
+   * Abre una evaluación ya consolidada, sin archivos cargados.
+   *
+   * Es lo que permite repasar el curso completo después: las revisiones quedan
+   * guardadas en el servidor y se recuperan por su lote, así que ajustar notas
+   * y exportar no obliga a volver a subir nada ni a pagar la revisión de nuevo.
+   */
+  abrirResultado({ studentName, delivery, evaluation, cobertura }) {
+    const ajustes = {};
+    for (const c of evaluation.criteria ?? []) {
+      ajustes[c.id] = { score: c.score, observation: '' };
+    }
+    set({
+      step: 'results',
+      delivery,
+      studentName,
+      uploadedFiles: [],
+      admissibility: null,
+      revisionPendiente: null,
+      evaluation: { ...evaluation, cobertura },
+      evalError: null,
+      adjustments: ajustes,
+      globalScore: evaluation.globalScore ?? null,
+      globalObservation: '',
+      globalJustificationEdit: null,
+    });
   },
 
   globalScore: null,           // professor's final global grade
