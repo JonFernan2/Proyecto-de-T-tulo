@@ -1,6 +1,7 @@
 import React from 'react';
 import { useGradingStore } from '../store/useGradingStore.js';
 import { DELIVERIES } from '../lib/rubric.js';
+import RevisionesPendientes from './RevisionesPendientes.jsx';
 
 export default function Step1_DeliverySetup() {
   const { delivery, setDelivery, studentName, setStudentName, goTo } = useGradingStore();
@@ -12,6 +13,8 @@ export default function Step1_DeliverySetup() {
         <h2 className="text-xl font-bold text-slate-800 mb-1">Nueva corrección</h2>
         <p className="text-sm text-slate-500">Selecciona la entrega y el nombre del estudiante para comenzar.</p>
       </div>
+
+      <RevisionesPendientes />
 
       {/* Delivery selector */}
       <div>

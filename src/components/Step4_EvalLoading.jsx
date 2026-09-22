@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useGradingStore } from '../store/useGradingStore.js';
-import { deepReview, verifyImages } from '../lib/claudeEval.js';
+import { deepReview, resumeDeepReview, verifyImages } from '../lib/claudeEval.js';
 import { DELIVERIES } from '../lib/rubric.js';
 
 const ETIQUETAS = {
@@ -34,14 +34,24 @@ export default function Step4_EvalLoading() {
     const images = getImages();
 
     async function run() {
-      const { admissibility } = useGradingStore.getState();
+      const { admissibility, revisionPendiente } = useGradingStore.getState();
 
       // ── Revisión profunda hoja por hoja ─────────────────────────────────────
-      const { evaluation, cobertura } = await deepReview({
-        delivery, studentName, filesMap, admissibility,
-        onProgress: setProgress,
-        shouldCancel: () => cancelado.current,
-      });
+      // Si se está retomando una ya lanzada, no se vuelve a enviar: el lote
+      // sigue procesándose del lado de la API y ya está pagado.
+      const { evaluation, cobertura } = revisionPendiente
+        ? await resumeDeepReview({
+            batchId: revisionPendiente.batchId,
+            plan: revisionPendiente.plan,
+            totalTandas: revisionPendiente.totalTandas,
+            onProgress: setProgress,
+            shouldCancel: () => cancelado.current,
+          })
+        : await deepReview({
+            delivery, studentName, filesMap, admissibility,
+            onProgress: setProgress,
+            shouldCancel: () => cancelado.current,
+          });
 
       evaluation.cobertura = cobertura;
 

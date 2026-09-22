@@ -29,7 +29,30 @@ export async function deepReview({ delivery, studentName, filesMap, admissibilit
   const { batchId, totalTandas, plan } = start;
   onProgress?.({ fase: 'revisando', plan, totalTandas, counts: { listas: 0, procesando: totalTandas, conError: 0 } });
 
-  // 2. Esperar a que terminen
+  return esperarYConsolidar({ batchId, plan, totalTandas, onProgress, shouldCancel });
+}
+
+/**
+ * Retoma una revisión ya lanzada. El lote sigue procesándose del lado de la API
+ * aunque se cierre el navegador, así que relanzarla sería pagarla dos veces.
+ */
+export async function resumeDeepReview({ batchId, plan, totalTandas, onProgress, shouldCancel }) {
+  onProgress?.({ fase: 'revisando', plan, totalTandas, batchId, counts: { listas: 0, procesando: 0, conError: 0 } });
+  return esperarYConsolidar({ batchId, plan, totalTandas, onProgress, shouldCancel });
+}
+
+export async function listarPendientes() {
+  const res = await fetch('/api/deep-review/pendientes');
+  const data = await res.json();
+  if (!data.ok) throw new Error(data.error ?? 'No se pudieron listar las revisiones pendientes.');
+  return data.pendientes;
+}
+
+export async function descartarPendiente(batchId) {
+  await fetch(`/api/deep-review/pendientes?batchId=${encodeURIComponent(batchId)}`, { method: 'DELETE' });
+}
+
+async function esperarYConsolidar({ batchId, plan, totalTandas, onProgress, shouldCancel }) {
   const limite = Date.now() + MAX_ESPERA_MS;
   for (;;) {
     if (shouldCancel?.()) throw new Error('CANCELADO');
@@ -69,7 +92,6 @@ export async function deepReview({ delivery, studentName, filesMap, admissibilit
     }
   }
 
-  // 3. Consolidar
   onProgress?.({ fase: 'consolidando', plan, totalTandas });
   const finishRes = await fetch('/api/deep-review/finish', {
     method: 'POST',

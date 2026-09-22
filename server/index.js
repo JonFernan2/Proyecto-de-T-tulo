@@ -182,6 +182,58 @@ app.post('/api/evaluate', async (req, res) => {
 
 // ─── Revisión profunda por tandas (Batch API) ────────────────────────────────
 
+// 0. Revisiones que quedaron a medio camino. El lote sigue procesándose del
+//    lado de la API aunque se cierre el navegador, así que hay que poder
+//    retomarlas en vez de relanzarlas y pagarlas dos veces.
+app.get('/api/deep-review/pendientes', async (_req, res) => {
+  try {
+    const pendientes = [];
+    for (const [batchId, ctx] of revisiones) {
+      let estado = 'desconocido';
+      let counts = null;
+      try {
+        const batch = await anthropic.messages.batches.retrieve(batchId);
+        const c = batch.request_counts ?? {};
+        estado = batch.processing_status;
+        counts = {
+          procesando: c.processing ?? 0,
+          listas: c.succeeded ?? 0,
+          conError: (c.errored ?? 0) + (c.canceled ?? 0) + (c.expired ?? 0),
+        };
+      } catch {
+        // El lote ya no existe del lado de la API: se informa igual para que
+        // pueda descartarse desde la pantalla.
+        estado = 'no encontrado';
+      }
+      pendientes.push({
+        batchId,
+        studentName: ctx.studentName,
+        delivery: ctx.delivery,
+        plan: ctx.plan,
+        creado: ctx.creado,
+        estado,
+        counts,
+        totalTandas: (ctx.plan ?? []).reduce((n, p) => n + (p.batches ?? 0), 0),
+      });
+    }
+    pendientes.sort((a, b) => b.creado - a.creado);
+    res.json({ ok: true, pendientes });
+  } catch (err) {
+    console.error('[deep-review/pendientes] ERROR:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Descartar una revisión que ya no sirve (lote caducado o relanzada).
+app.delete('/api/deep-review/pendientes', (req, res) => {
+  const { batchId } = req.query;
+  revisiones.delete(batchId);
+  eliminarRevision(batchId);
+  console.log(`[deep-review] descartada ${batchId}`);
+  res.json({ ok: true });
+});
+
+
 // 1. Lanza la revisión: parte los libros en tandas y las envía al Batch API.
 app.post('/api/deep-review/start', async (req, res) => {
   try {

@@ -130,6 +130,9 @@ export const useGradingStore = create((set, get) => ({
   },
 
   // ── Admissibility ────────────────────────────────────────────────────────────
+  // Revisión ya lanzada que se está retomando, en vez de empezar una nueva.
+  revisionPendiente: null,
+
   admissibility: null,   // { passed, results }
   setAdmissibility: adm => set({ admissibility: adm }),
 
@@ -170,6 +173,7 @@ export const useGradingStore = create((set, get) => ({
       studentName: '',
       uploadedFiles: [],
       admissibility: null,
+      revisionPendiente: null,
       evaluation: null,
       evalError: null,
       adjustments: {},
