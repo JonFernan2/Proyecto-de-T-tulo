@@ -11,6 +11,7 @@ export default function Step4_EvalLoading() {
   const [imageBatch, setImageBatch] = useState(null);
   const [error, setError] = useState(null);
   const started = useRef(false);
+  const cancelado = useRef(false);
 
   useEffect(() => {
     if (started.current) return;
@@ -26,6 +27,7 @@ export default function Step4_EvalLoading() {
       const { evaluation, cobertura } = await deepReview({
         delivery, studentName, filesMap, admissibility,
         onProgress: setProgress,
+        shouldCancel: () => cancelado.current,
       });
 
       evaluation.cobertura = cobertura;
@@ -77,6 +79,7 @@ export default function Step4_EvalLoading() {
     }
 
     run().catch(err => {
+      if (err.message === 'CANCELADO') return;   // salida voluntaria, no es falla
       setError(err.message);
       setEvalError(err.message);
     });
@@ -130,6 +133,12 @@ export default function Step4_EvalLoading() {
               </div>
             ))}
           </div>
+          {!plan.some(p => p.kind === 'cub') && (
+            <div className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              No se detectaron hojas de cubicaciones. Revisa que el Excel correcto esté
+              asignado al rol «Listado + Cubicaciones» en el paso de archivos.
+            </div>
+          )}
         </div>
       )}
 
@@ -168,6 +177,15 @@ export default function Step4_EvalLoading() {
       <div className="text-xs text-slate-400 text-center leading-relaxed">
         La revisión completa tarda varios minutos porque se lee cada hoja del libro,
         no una muestra. Puedes dejar esta pestaña abierta y volver después.
+      </div>
+
+      <div className="text-center">
+        <button
+          onClick={() => { cancelado.current = true; goTo('admissibility'); }}
+          className="text-xs text-slate-500 hover:text-red-600 underline underline-offset-2"
+        >
+          Cancelar revisión y volver
+        </button>
       </div>
     </div>
   );

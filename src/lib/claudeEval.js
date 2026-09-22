@@ -1,5 +1,8 @@
 const BATCH_SIZE = 15;
 const POLL_MS = 8000;
+// Tope de espera. El Batch API es asíncrono y puede tardar, pero sin límite la
+// pantalla se queda girando para siempre cuando algo falla del lado de la API.
+const MAX_ESPERA_MS = 30 * 60 * 1000;
 
 /**
  * Revisión profunda: parte los libros en tandas, las manda al Batch API y
@@ -10,7 +13,7 @@ const POLL_MS = 8000;
  *
  * onProgress({ fase, plan, counts }) informa el avance.
  */
-export async function deepReview({ delivery, studentName, filesMap, admissibility, onProgress }) {
+export async function deepReview({ delivery, studentName, filesMap, admissibility, onProgress, shouldCancel }) {
   const payload = buildPayload({ filesMap, admissibility });
 
   // 1. Lanzar las tandas
@@ -27,7 +30,18 @@ export async function deepReview({ delivery, studentName, filesMap, admissibilit
   onProgress?.({ fase: 'revisando', plan, totalTandas, counts: { listas: 0, procesando: totalTandas, conError: 0 } });
 
   // 2. Esperar a que terminen
+  const limite = Date.now() + MAX_ESPERA_MS;
   for (;;) {
+    if (shouldCancel?.()) throw new Error('CANCELADO');
+
+    if (Date.now() > limite) {
+      throw new Error(
+        `La revisión superó los ${Math.round(MAX_ESPERA_MS / 60000)} minutos de espera sin completarse. ` +
+        'Suele deberse a que la cuenta de Anthropic se quedó sin créditos. ' +
+        'Revisa el saldo en console.anthropic.com y vuelve a lanzarla.',
+      );
+    }
+
     await sleep(POLL_MS);
 
     const statusRes = await fetch(`/api/deep-review/status?batchId=${encodeURIComponent(batchId)}`);
@@ -35,7 +49,19 @@ export async function deepReview({ delivery, studentName, filesMap, admissibilit
     if (!status.ok) throw new Error(status.error ?? 'Error consultando el avance.');
 
     onProgress?.({ fase: 'revisando', plan, totalTandas, counts: status.counts });
-    if (status.status === 'ended') break;
+
+    if (status.status === 'ended') {
+      // Terminó, pero puede haber terminado mal: si ninguna tanda salió bien,
+      // consolidar no tiene sentido y el error real se pierde.
+      if (status.counts.listas === 0) {
+        throw new Error(
+          `Las ${totalTandas} tanda(s) terminaron sin resultados utilizables. ` +
+          'La causa habitual es falta de créditos en la cuenta de Anthropic. ' +
+          'Verifica el saldo en console.anthropic.com.',
+        );
+      }
+      break;
+    }
   }
 
   // 3. Consolidar

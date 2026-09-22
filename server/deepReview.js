@@ -82,8 +82,13 @@ export function buildDeepReviewRequests({ delivery, studentName, model, rubric, 
     plan.push({ kind, sheets: sheets.length, batches: chunks.length });
   };
 
-  // Las cubicaciones excluyen la hoja del listado: ya viaja en el prefijo.
-  const cubSheets = (cubicaciones?.sheets ?? []).filter(s => !esHojaListado(s.name));
+  // Se descarta ÚNICAMENTE la hoja que se usa como listado (la primera que
+  // coincide), no toda hoja cuyo nombre contenga "partida" o "actividad":
+  // los libros suelen nombrar sus hojas "1.1 PARTIDAS PRELIMINARES" y un
+  // filtro por nombre sobre todas las hojas dejaría la revisión vacía.
+  const todasCub = cubicaciones?.sheets ?? [];
+  const idxListado = todasCub.findIndex(s => esHojaListado(s.name));
+  const cubSheets = todasCub.filter((_, i) => i !== idxListado);
   push('cub', cubSheets, CHUNK_CUBICACIONES, INSTRUCCIONES_CUBICACIONES);
 
   push('cot', cotizaciones?.sheets ?? [], CHUNK_COTIZACIONES, INSTRUCCIONES_COTIZACIONES);
