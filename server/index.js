@@ -228,23 +228,42 @@ app.get('/api/deep-review/pendientes', async (_req, res) => {
 // sin esto un lote entero caído no deja rastro de la causa.
 app.get('/api/deep-review/errores', async (req, res) => {
   try {
+    const porTipo = new Map();
     const porMotivo = new Map();
     let total = 0;
     let exitosas = 0;
+    let muestra = null;   // primer resultado fallido, crudo, para diagnosticar
 
     for await (const entry of await anthropic.messages.batches.results(req.query.batchId)) {
       total++;
       if (entry.result?.type === 'succeeded') { exitosas++; continue; }
-      const err = entry.result?.error?.error ?? entry.result?.error ?? {};
-      const motivo = err.message ?? err.type ?? JSON.stringify(err).slice(0, 400);
+
+      const tipo = entry.result?.type ?? 'sin tipo';
+      porTipo.set(tipo, (porTipo.get(tipo) ?? 0) + 1);
+
+      // Un lote "expired" o "canceled" no trae error: el tipo ES el motivo.
+      const err = entry.result?.error?.error ?? entry.result?.error;
+      const motivo = err?.message ?? err?.type ?? tipo;
       porMotivo.set(motivo, (porMotivo.get(motivo) ?? 0) + 1);
+
+      if (!muestra) muestra = JSON.parse(JSON.stringify(entry.result)).toString === undefined
+        ? entry.result
+        : entry.result;
     }
 
     const motivos = [...porMotivo.entries()].map(([motivo, veces]) => ({ motivo, veces }));
-    console.log(`[deep-review/errores] ${req.query.batchId}: ${exitosas}/${total} exitosas`);
-    for (const m of motivos) console.log(`  · ${m.veces}× ${m.motivo}`);
+    const tipos = [...porTipo.entries()].map(([tipo, veces]) => ({ tipo, veces }));
 
-    res.json({ ok: true, total, exitosas, fallidas: total - exitosas, motivos });
+    console.log(`[deep-review/errores] ${req.query.batchId}: ${exitosas}/${total} exitosas`);
+    for (const t of tipos) console.log(`  · ${t.veces}× tipo "${t.tipo}"`);
+    for (const m of motivos) console.log(`  · ${m.veces}× ${m.motivo}`);
+    if (muestra) console.log('  estructura cruda:', JSON.stringify(muestra).slice(0, 800));
+
+    res.json({
+      ok: true, total, exitosas, fallidas: total - exitosas,
+      tipos, motivos,
+      muestra: muestra ? JSON.parse(JSON.stringify(muestra)) : null,
+    });
   } catch (err) {
     console.error('[deep-review/errores] ERROR:', err.message);
     res.status(500).json({ ok: false, error: err.message });
