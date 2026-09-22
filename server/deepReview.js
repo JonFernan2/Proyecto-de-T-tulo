@@ -17,6 +17,16 @@ export const CHUNK_PDF_PAGINAS = 30;
 // Filas máximas que se envían por hoja dentro de una tanda.
 const MAX_ROWS_PER_SHEET = 200;
 
+// Presupuesto de imágenes por petición. Dos límites de la API obligan a acotar:
+// pasadas las 20 imágenes cada una debe ser más pequeña, y una petición con
+// decenas de capturas sin comprimir supera el tamaño admitido y falla entera,
+// llevándose consigo todas las hojas de esa tanda.
+const MAX_IMAGENES_POR_TANDA = 18;
+const MAX_BYTES_IMAGENES_POR_TANDA = 4 * 1024 * 1024;
+
+// El base64 ocupa cuatro caracteres por cada tres bytes.
+const bytesDeBase64 = data => Math.floor((data?.length ?? 0) * 0.75);
+
 // ─── Herramienta de hallazgos por tanda ──────────────────────────────────────
 export const BATCH_FINDINGS_TOOL = {
   name: 'submit_batch_findings',
@@ -360,6 +370,10 @@ function formatSheetsChunk(sheets, kind, n, total) {
   let texto = `TANDA ${n} de ${total} — ${sheets.length} hoja(s) de ${etiqueta}.\n`;
   texto += `Revisa TODAS las hojas de esta tanda y entrega una entrada por cada una.\n\n`;
 
+  let imagenesUsadas = 0;
+  let bytesUsados = 0;
+  let omitidas = 0;
+
   for (const sheet of sheets) {
     texto += `━━━ HOJA: ${sheet.name} ━━━\n`;
 
@@ -379,18 +393,38 @@ function formatSheetsChunk(sheets, kind, n, total) {
       texto += `... (${rows.length - MAX_ROWS_PER_SHEET} filas más en esta hoja)\n`;
     }
 
-    const imgs = sheet.images ?? [];
-    if (imgs.length) {
-      texto += `\nRespaldo incrustado en la hoja "${sheet.name}" (${imgs.length} imagen(es)), a continuación:\n`;
+    // Solo entran las imágenes que caben en el presupuesto: pasarse hace fallar
+    // la petición completa y se pierden también las hojas de la tanda.
+    const caben = [];
+    for (const img of sheet.images ?? []) {
+      const bytes = bytesDeBase64(img.data);
+      if (imagenesUsadas >= MAX_IMAGENES_POR_TANDA || bytesUsados + bytes > MAX_BYTES_IMAGENES_POR_TANDA) {
+        omitidas++;
+        continue;
+      }
+      caben.push(img);
+      imagenesUsadas++;
+      bytesUsados += bytes;
+    }
+
+    if (caben.length) {
+      texto += `\nRespaldo incrustado en la hoja "${sheet.name}" (${caben.length} imagen(es)), a continuación:\n`;
       bloques.push({ type: 'text', text: texto });
       texto = '';
-      for (const img of imgs) {
+      for (const img of caben) {
         bloques.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: img.data } });
       }
       texto += `(fin del respaldo de "${sheet.name}")\n`;
+    } else if (sheet.images?.length) {
+      texto += `[Esta hoja tiene ${sheet.images.length} imagen(es) de respaldo incrustada(s) que no `
+             + `caben en esta tanda. El respaldo EXISTE — no afirmes que falta.]\n`;
     }
 
     texto += '\n';
+  }
+
+  if (omitidas > 0) {
+    texto += `\n(${omitidas} imagen(es) de esta tanda quedaron fuera por tamaño; su respaldo existe igualmente.)\n`;
   }
 
   if (texto.trim()) bloques.push({ type: 'text', text: texto });

@@ -224,6 +224,33 @@ app.get('/api/deep-review/pendientes', async (_req, res) => {
   }
 });
 
+// Diagnóstico: por qué falló un lote. Los motivos vienen en los resultados y
+// sin esto un lote entero caído no deja rastro de la causa.
+app.get('/api/deep-review/errores', async (req, res) => {
+  try {
+    const porMotivo = new Map();
+    let total = 0;
+    let exitosas = 0;
+
+    for await (const entry of await anthropic.messages.batches.results(req.query.batchId)) {
+      total++;
+      if (entry.result?.type === 'succeeded') { exitosas++; continue; }
+      const err = entry.result?.error?.error ?? entry.result?.error ?? {};
+      const motivo = err.message ?? err.type ?? JSON.stringify(err).slice(0, 400);
+      porMotivo.set(motivo, (porMotivo.get(motivo) ?? 0) + 1);
+    }
+
+    const motivos = [...porMotivo.entries()].map(([motivo, veces]) => ({ motivo, veces }));
+    console.log(`[deep-review/errores] ${req.query.batchId}: ${exitosas}/${total} exitosas`);
+    for (const m of motivos) console.log(`  · ${m.veces}× ${m.motivo}`);
+
+    res.json({ ok: true, total, exitosas, fallidas: total - exitosas, motivos });
+  } catch (err) {
+    console.error('[deep-review/errores] ERROR:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Descartar una revisión que ya no sirve (lote caducado o relanzada).
 app.delete('/api/deep-review/pendientes', (req, res) => {
   const { batchId } = req.query;
@@ -321,16 +348,34 @@ app.post('/api/deep-review/finish', async (req, res) => {
     const fallidas = [];
     for await (const entry of await anthropic.messages.batches.results(batchId)) {
       if (entry.result?.type !== 'succeeded') {
-        fallidas.push(entry.custom_id);
+        // El motivo del fallo viene aquí y antes se descartaba, dejando sin
+        // diagnóstico un lote entero caído.
+        const err = entry.result?.error?.error ?? entry.result?.error ?? {};
+        fallidas.push({
+          custom_id: entry.custom_id,
+          tipo: entry.result?.type ?? 'desconocido',
+          motivo: err.message ?? err.type ?? JSON.stringify(err).slice(0, 300),
+        });
         continue;
       }
       const toolUse = entry.result.message.content.find(b => b.type === 'tool_use');
       if (toolUse) findings.push({ custom_id: entry.custom_id, result: toolUse.input });
-      else fallidas.push(entry.custom_id);
+      else fallidas.push({ custom_id: entry.custom_id, tipo: 'sin tool_use', motivo: 'la respuesta no trae el resultado esperado' });
+    }
+
+    if (fallidas.length) {
+      console.error(`[deep-review] ${ctx.studentName}: ${fallidas.length} tanda(s) fallidas`);
+      // Los motivos se repiten entre tandas; se agrupan para no llenar la consola.
+      const porMotivo = new Map();
+      for (const f of fallidas) porMotivo.set(f.motivo, (porMotivo.get(f.motivo) ?? 0) + 1);
+      for (const [motivo, n] of porMotivo) console.error(`  · ${n}× ${motivo}`);
     }
 
     if (!findings.length) {
-      throw new Error('Ninguna tanda entregó resultados utilizables.');
+      const motivos = [...new Set(fallidas.map(f => f.motivo))].slice(0, 3).join(' · ');
+      throw new Error(
+        `Las ${fallidas.length} tanda(s) fallaron. Motivo: ${motivos || 'no informado por la API'}`,
+      );
     }
 
     const { texto, totales } = formatFindingsForConsolidation(findings);
@@ -355,7 +400,7 @@ app.post('/api/deep-review/finish', async (req, res) => {
     res.json({
       ok: true,
       evaluation: toolUse.input,
-      cobertura: { ...totales, tandasFallidas: fallidas.length },
+      cobertura: { ...totales, tandasFallidas: fallidas.length, motivosFallo: [...new Set(fallidas.map(f => f.motivo))].slice(0, 5) },
     });
   } catch (err) {
     console.error('[deep-review/finish] ERROR:', err.message);
