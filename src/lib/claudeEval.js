@@ -1,8 +1,10 @@
 const BATCH_SIZE = 15;
 const POLL_MS = 8000;
-// Tope de espera. El Batch API es asíncrono y puede tardar, pero sin límite la
-// pantalla se queda girando para siempre cuando algo falla del lado de la API.
-const MAX_ESPERA_MS = 30 * 60 * 1000;
+// Cuánto se queda la pantalla esperando. El Batch API suele responder en menos
+// de una hora pero la garantía es de 24, así que 30 minutos cortaba revisiones
+// sanas. Dejar de mirar no las cancela: el lote sigue y puede retomarse desde
+// la pantalla inicial.
+const MAX_ESPERA_MS = 2 * 60 * 60 * 1000;
 
 /**
  * Revisión profunda: parte los libros en tandas, las manda al Batch API y
@@ -59,9 +61,10 @@ async function esperarYConsolidar({ batchId, plan, totalTandas, onProgress, shou
 
     if (Date.now() > limite) {
       throw new Error(
-        `La revisión superó los ${Math.round(MAX_ESPERA_MS / 60000)} minutos de espera sin completarse. ` +
-        'Suele deberse a que la cuenta de Anthropic se quedó sin créditos. ' +
-        'Revisa el saldo en console.anthropic.com y vuelve a lanzarla.',
+        `Se dejó de esperar tras ${Math.round(MAX_ESPERA_MS / 3_600_000)} horas. ` +
+        'La revisión NO se canceló: el lote sigue procesándose y aparece en la ' +
+        'pantalla inicial para retomarla cuando termine. ' +
+        'Si lleva mucho más de lo normal, revisa el saldo en console.anthropic.com.',
       );
     }
 
