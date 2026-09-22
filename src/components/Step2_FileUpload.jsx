@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { useGradingStore } from '../store/useGradingStore.js';
 import { DELIVERIES } from '../lib/rubric.js';
@@ -58,6 +58,7 @@ function fileTypeIcon(file) {
 export default function Step2_FileUpload() {
   const { delivery, studentName, setStudentName, uploadedFiles, addFiles, removeFile, updateFileRole, setParsed, goTo } = useGradingStore();
   const [parsing, setParsing] = useState({});  // { fileId: true }
+  const carpetaRef = useRef(null);
   const expectedFiles = DELIVERIES[delivery]?.expectedFiles ?? [];
   const roleOptions = delivery === 'E2' ? ROLE_OPTIONS_E2 : ROLE_OPTIONS_E1;
 
@@ -96,9 +97,14 @@ export default function Step2_FileUpload() {
 
     addFiles(newEntries);
 
-    // Auto-detect student name from first file if not set
+    // Al elegir una carpeta, su nombre identifica al estudiante mejor que el
+    // del primer archivo, que suele traer el nombre del proyecto.
     if (!studentName.trim() && newEntries.length > 0) {
-      const detected = detectStudentName(newEntries[0].file.name);
+      const ruta = newEntries[0].file.webkitRelativePath ?? '';
+      const carpeta = ruta.split('/')[0];
+      const detected = carpeta
+        ? detectStudentName(carpeta)
+        : detectStudentName(newEntries[0].file.name);
       if (detected) setStudentName(detected);
     }
 
@@ -157,9 +163,36 @@ export default function Step2_FileUpload() {
         <input {...getInputProps()} />
         <div className="text-4xl mb-2">📂</div>
         <div className="text-sm font-medium text-slate-600">
-          {isDragActive ? 'Suelta los archivos aquí...' : 'Arrastra los archivos aquí o haz clic para seleccionar'}
+          {isDragActive
+            ? 'Suelta aquí...'
+            : 'Arrastra la carpeta del estudiante, o archivos sueltos'}
         </div>
-        <div className="text-xs text-slate-400 mt-1">Word, Excel, PDF, imágenes — múltiples archivos a la vez</div>
+        <div className="text-xs text-slate-400 mt-1">
+          Word, Excel, PDF, imágenes — al arrastrar una carpeta se carga todo su contenido
+        </div>
+      </div>
+
+      {/* Selector de carpeta: el arrastre no siempre es evidente */}
+      <div className="text-center -mt-2">
+        <input
+          ref={carpetaRef}
+          type="file"
+          webkitdirectory=""
+          directory=""
+          multiple
+          className="hidden"
+          onChange={e => {
+            const archivos = Array.from(e.target.files ?? []);
+            if (archivos.length) onDrop(archivos);
+            e.target.value = '';   // permite volver a elegir la misma carpeta
+          }}
+        />
+        <button
+          onClick={() => carpetaRef.current?.click()}
+          className="text-sm text-uvm-blue hover:underline underline-offset-2 font-medium"
+        >
+          📁 Seleccionar carpeta del estudiante
+        </button>
       </div>
 
       {/* File list */}
