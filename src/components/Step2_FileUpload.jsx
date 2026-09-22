@@ -3,7 +3,7 @@ import { useDropzone } from 'react-dropzone';
 import { useGradingStore } from '../store/useGradingStore.js';
 import { DELIVERIES } from '../lib/rubric.js';
 import { parseExcel, parseWord, parsePdf, parseImage, detectStudentName } from '../lib/fileParser.js';
-import { guessRole } from '../lib/roles.js';
+import { guessRole, agruparPorEstudiante, detectarMezcla } from '../lib/roles.js';
 import LanzadorCurso from './LanzadorCurso.jsx';
 
 const ROLE_OPTIONS_E1 = [
@@ -23,21 +23,9 @@ const ROLE_OPTIONS_E2 = [
   { value: 'apu', label: 'APU — Cartillas (Anexo 01)' },
 ];
 
-/**
- * Agrupa los archivos por carpeta de estudiante cuando se eligió la carpeta del
- * curso completo: las rutas llegan como CURSO/ALUMNO/archivo.
- * Devuelve null si los archivos vienen de una sola carpeta o sueltos.
- */
-function agruparPorEstudiante(archivos) {
-  const grupos = new Map();
-  for (const f of archivos) {
-    const partes = (f.webkitRelativePath ?? '').split('/');
-    if (partes.length < 3) return null;        // no es una carpeta de carpetas
-    const alumno = partes[partes.length - 2];
-    if (!grupos.has(alumno)) grupos.set(alumno, []);
-    grupos.get(alumno).push(f);
-  }
-  return grupos;
+// Los apellidos se detectan en minúsculas; en pantalla se leen mejor así.
+function conMayusculas(texto) {
+  return texto.replace(/\b\p{Ll}/gu, c => c.toUpperCase());
 }
 
 function fileTypeIcon(file) {
@@ -55,6 +43,7 @@ export default function Step2_FileUpload() {
   const carpetaRef = useRef(null);
   const [carpetas, setCarpetas] = useState(null);  // curso completo detectado
   const [modoCurso, setModoCurso] = useState(false);
+  const [mezclaAceptada, setMezclaAceptada] = useState(false);
   const expectedFiles = DELIVERIES[delivery]?.expectedFiles ?? [];
   const roleOptions = delivery === 'E2' ? ROLE_OPTIONS_E2 : ROLE_OPTIONS_E1;
 
@@ -83,7 +72,9 @@ export default function Step2_FileUpload() {
     }
   }, [setParsed]);
 
-  const cargar = useCallback((archivos) => {
+  // `carpetaAlumno` llega cuando se eligió a uno del listado del curso: ahí el
+  // nombre lo da esa carpeta, no la ruta.
+  const cargar = useCallback((archivos, carpetaAlumno = null) => {
     setCarpetas(null);
     setModoCurso(false);
 
@@ -97,10 +88,13 @@ export default function Step2_FileUpload() {
     addFiles(newEntries);
 
     // Al elegir una carpeta, su nombre identifica al estudiante mejor que el
-    // del primer archivo, que suele traer el nombre del proyecto.
+    // del primer archivo, que suele traer el nombre del proyecto. Se toma la
+    // carpeta RAÍZ, no la que contiene al archivo: un alumno puede ordenar lo
+    // suyo en subcarpetas, y «COTIZACIONES» no es el nombre de nadie.
     if (!studentName.trim() && newEntries.length > 0) {
-      const partes = (newEntries[0].file.webkitRelativePath ?? '').split('/');
-      const carpeta = partes.length >= 2 ? partes[partes.length - 2] : '';
+      const ruta = (newEntries[0].file.webkitRelativePath || newEntries[0].file.path || '')
+        .split('/').filter(Boolean);
+      const carpeta = carpetaAlumno ?? (ruta.length >= 2 ? ruta[0] : '');
       const detected = carpeta
         ? detectStudentName(carpeta)
         : detectStudentName(newEntries[0].file.name);
@@ -117,7 +111,7 @@ export default function Step2_FileUpload() {
     // archivos vienen como CURSO/ALUMNO/archivo. Cargarlos todos juntos
     // mezclaría a los estudiantes en una sola revisión sin avisar.
     const porCarpeta = agruparPorEstudiante(acceptedFiles);
-    if (porCarpeta && porCarpeta.size > 1) {
+    if (porCarpeta) {
       setCarpetas(porCarpeta);
       setModoCurso(false);
       return;
@@ -131,11 +125,17 @@ export default function Step2_FileUpload() {
   const requiredRoles = expectedFiles.filter(f => f.required).map(f => f.role);
   const coveredRoles = new Set(uploadedFiles.map(f => f.role));
   const missingRequired = requiredRoles.filter(r => !coveredRoles.has(r));
+  // Mezclar estudiantes no falla: produce una corrección que evalúa a varios
+  // como si fueran uno, y cuesta lo mismo que una buena.
+  const mezcla = detectarMezcla(uploadedFiles);
+  const bloqueadoPorMezcla = Boolean(mezcla) && !mezclaAceptada;
+
   const allParsed = Object.keys(parsing).length === 0;
   // El nombre ya no se exige en el paso anterior —el curso completo no tiene
   // uno— así que se comprueba aquí, que es donde empieza a hacer falta.
   const sinNombre = studentName.trim().length < 3;
-  const canContinue = missingRequired.length === 0 && allParsed && uploadedFiles.length > 0 && !sinNombre;
+  const canContinue = missingRequired.length === 0 && allParsed
+    && uploadedFiles.length > 0 && !sinNombre && !bloqueadoPorMezcla;
 
   return (
     <div className="space-y-5">
@@ -222,7 +222,7 @@ export default function Step2_FileUpload() {
             {[...carpetas.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([alumno, archivos]) => (
               <button
                 key={alumno}
-                onClick={() => cargar(archivos)}
+                onClick={() => cargar(archivos, alumno)}
                 className="w-full text-left bg-white border border-blue-100 rounded-lg px-3 py-2
                   hover:border-uvm-blue hover:shadow-sm transition-all flex items-center justify-between gap-3"
               >
@@ -328,6 +328,52 @@ export default function Step2_FileUpload() {
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Varios estudiantes en una sola corrección: el fallo más caro que puede
+          cometerse aquí, porque no falla — evalúa. */}
+      {mezcla && !mezclaAceptada && (
+        <div className="bg-red-50 border-2 border-red-300 rounded-xl p-4 space-y-3">
+          <div className="text-sm font-bold text-red-800">
+            Parece que hay más de un estudiante en estos archivos
+          </div>
+
+          <div className="text-xs text-red-900 leading-relaxed space-y-1.5">
+            {mezcla.nombres.length >= 2 && (
+              <div>
+                Los nombres de archivo apuntan a varias personas:{' '}
+                <span className="font-semibold">{mezcla.nombres.map(conMayusculas).join(' · ')}</span>.
+              </div>
+            )}
+            {mezcla.duplicados.map(d => (
+              <div key={d.rol}>
+                Hay <span className="font-semibold">{d.n} archivos</span> con el rol «{d.rol}»,
+                y una entrega trae uno.
+              </div>
+            ))}
+            <div className="pt-1">
+              Corregirlos juntos no da error: produce una evaluación que trata a todos
+              como un solo estudiante, y cuesta lo mismo que una revisión correcta.
+              Quita los que no correspondan, o vuelve atrás y carga la carpeta del curso
+              para revisarlos por separado.
+            </div>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={() => { useGradingStore.getState().reset(); }}
+              className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-red-600 hover:bg-red-700"
+            >
+              Empezar de nuevo
+            </button>
+            <button
+              onClick={() => setMezclaAceptada(true)}
+              className="px-4 py-2 rounded-lg text-xs font-medium text-red-700 bg-white border border-red-300 hover:bg-red-50"
+            >
+              Son de un solo estudiante — continuar
+            </button>
+          </div>
         </div>
       )}
 
