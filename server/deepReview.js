@@ -32,7 +32,12 @@ export const BATCH_FINDINGS_TOOL = {
             item: { type: 'string', description: 'N° de ítem del listado al que corresponde, o "sin identificar".' },
             estado: {
               type: 'string',
-              enum: ['Correcta', 'Con errores', 'Incompleta', 'Sin formulas'],
+              enum: ['Correcta', 'Con errores', 'Incompleta', 'Sin formulas', 'Medida en software'],
+              description:
+                '"Medida en software" cuando el cálculo se respalda con una captura de ' +
+                'AutoCAD/BIM y la cifra medida coincide con el total de la hoja: es válido ' +
+                'según la pauta y no debe tratarse como falta de fórmula. Si la cifra NO ' +
+                'coincide, usa "Con errores".',
             },
             hallazgo: {
               type: 'string',
@@ -65,7 +70,14 @@ export function buildDeepReviewRequests({ delivery, studentName, model, rubric, 
 
   const push = (kind, sheets, chunkSize, instrucciones) => {
     if (!sheets?.length) return;
-    const chunks = chunkArray(sheets, chunkSize);
+
+    // Las hojas con respaldo incrustado pesan mucho más: cada captura de AutoCAD
+    // ocupa lo que cientos de filas de texto. Se reduce la tanda para que el
+    // modelo pueda atender a cada imagen en vez de sobrevolarlas.
+    const conImagenes = sheets.filter(s => s.images?.length).length;
+    const tam = conImagenes > sheets.length / 4 ? Math.min(chunkSize, 8) : chunkSize;
+
+    const chunks = chunkArray(sheets, tam);
     chunks.forEach((chunk, i) => {
       requests.push({
         custom_id: `${kind}-${String(i).padStart(3, '0')}`,
@@ -79,7 +91,7 @@ export function buildDeepReviewRequests({ delivery, studentName, model, rubric, 
         },
       });
     });
-    plan.push({ kind, sheets: sheets.length, batches: chunks.length });
+    plan.push({ kind, sheets: sheets.length, batches: chunks.length, conImagenes });
   };
 
   // Si el listado vino como archivo aparte, el libro de cubicaciones se revisa
@@ -155,25 +167,36 @@ Por cada hoja de esta tanda:
    [fórmula: =B5*C5]. Comprueba que el resultado informado sea coherente con
    la fórmula y con los valores de las celdas que referencia. Cuando encuentres
    un descuadre, cita la fórmula, el resultado informado y el valor correcto.
-3. Marca "Sin formulas" si la hoja trae solo números duros: la pauta exige
-   fórmulas explícitas y desarrolladas.
-4. Revisa que haya al menos 2 decimales y que no se haya redondeado al entero
+3. Revisa que haya al menos 2 decimales y que no se haya redondeado al entero
    superior. La pauta es explícita: 37.859,57 kg jamás debe informarse 37.860 kg.
-5. Los materiales medidos en UN van en enteros. Una cubicación de 4,8 unidades
+4. Los materiales medidos en UN van en enteros. Una cubicación de 4,8 unidades
    de WC es un error.
-6. Marca "Incompleta" si faltan partidas del listado que esa hoja debería cubrir.
+5. Marca "Incompleta" si faltan partidas del listado que esa hoja debería cubrir.
 
-EL RESPALDO ADMITE VARIAS FORMAS Y NINGUNA VALE MENOS QUE OTRA.
-La pauta exige que el cálculo quede respaldado, no que lo esté de una manera
-concreta. Un estudiante puede dejarlo:
-- como imágenes incrustadas en la propia hoja (aparecen anotadas arriba de la hoja);
-- desarrollado con fórmulas en las mismas celdas;
-- escrito en filas anexas dentro de la hoja;
-- o en archivos aparte (PDF escaneado, fotos del cuaderno de cubicaciones).
-Nunca escribas que falta respaldo solo porque no lo ves en el formato que
-esperabas. Si la hoja trae imágenes incrustadas o el cálculo desarrollado,
-el respaldo está. Solo señala falta de respaldo cuando la hoja entregue
-resultados sin fórmula, sin desarrollo y sin imagen alguna.
+MEDICIÓN CON SOFTWARE: CUENTA COMO CÁLCULO DESARROLLADO.
+La pauta acepta expresamente dimensionar con AutoCAD o BIM. Cuando la hoja trae
+una captura del panel de propiedades con el área, longitud o volumen medido,
+ESO ES el cálculo desarrollado y está correcto así. NO marques "Sin formulas"
+ni penalices la falta de fórmula en esas hojas.
+
+Lo que sí debes verificar en ellas es LA COINCIDENCIA DE LOS NÚMEROS:
+- Lee la cifra del panel de propiedades de la captura (ej: "Área 4895.8503",
+  "Longitud 252.2016").
+- Compárala con el total informado en las celdas de la hoja (ej: 4895,85 · 252,20).
+- Deben coincidir, admitiendo el truncado a 2 decimales que exige la pauta.
+- Si no coinciden, es un hallazgo importante: cita ambas cifras.
+- Si el valor del Excel está redondeado hacia arriba respecto del medido,
+  señálalo: la pauta lo prohíbe expresamente.
+- Si la captura corresponde a una partida distinta de la que declara la hoja,
+  señálalo.
+- Si la imagen es ilegible o no alcanzas a leer la cifra, dilo: no inventes
+  un número ni supongas que coincide.
+
+EL RESPALDO ADMITE VARIAS FORMAS Y NINGUNA VALE MENOS QUE OTRA:
+captura de medición en software, fórmulas desarrolladas en las celdas, cálculo
+escrito en filas anexas, o archivos aparte (PDF escaneado, fotos del cuaderno).
+Marca "Sin formulas" únicamente cuando la hoja entregue un resultado sin fórmula,
+sin desarrollo y sin imagen alguna que lo respalde.
 
 NO penalices la ausencia de Instalaciones Eléctricas, CCDD, CCTV, Clima,
 Ascensores ni Redes de Gases: la pauta las excluye en proyectos de Edificación.`;
@@ -225,19 +248,20 @@ Por cada cartilla de esta tanda:
 7. Verifica la aritmética de cada fórmula, igual que en cubicaciones.`;
 
 // ─── Formato de una tanda de hojas ───────────────────────────────────────────
+/**
+ * Devuelve los bloques de contenido de una tanda: el texto de las hojas y, si
+ * las traen, sus imágenes de respaldo intercaladas donde corresponde, para que
+ * cada captura quede junto a las filas de su propia hoja.
+ */
 function formatSheetsChunk(sheets, kind, n, total) {
   const etiqueta = { cub: 'CUBICACIONES', cot: 'COTIZACIONES', apu: 'APU' }[kind] ?? kind;
-
-  let out = `TANDA ${n} de ${total} — ${sheets.length} hoja(s) de ${etiqueta}.\n`;
-  out += `Revisa TODAS las hojas de esta tanda y entrega una entrada por cada una.\n\n`;
+  const bloques = [];
+  let texto = `TANDA ${n} de ${total} — ${sheets.length} hoja(s) de ${etiqueta}.\n`;
+  texto += `Revisa TODAS las hojas de esta tanda y entrega una entrada por cada una.\n\n`;
 
   for (const sheet of sheets) {
-    out += `━━━ HOJA: ${sheet.name} ━━━\n`;
-    if (sheet.embeddedImages > 0) {
-      out += `[Esta hoja tiene ${sheet.embeddedImages} imagen(es) incrustada(s): el respaldo `
-           + `del cálculo va dentro de la propia hoja. No las ves, pero EXISTEN — `
-           + `no afirmes que falta respaldo en esta partida.]\n`;
-    }
+    texto += `━━━ HOJA: ${sheet.name} ━━━\n`;
+
     const rows = sheet.rows ?? [];
     for (const row of rows.slice(0, MAX_ROWS_PER_SHEET)) {
       const cells = row
@@ -248,15 +272,28 @@ function formatSheetsChunk(sheets, kind, n, total) {
           return v;
         })
         .filter(Boolean);
-      if (cells.length) out += cells.join(' | ') + '\n';
+      if (cells.length) texto += cells.join(' | ') + '\n';
     }
     if (rows.length > MAX_ROWS_PER_SHEET) {
-      out += `... (${rows.length - MAX_ROWS_PER_SHEET} filas más en esta hoja)\n`;
+      texto += `... (${rows.length - MAX_ROWS_PER_SHEET} filas más en esta hoja)\n`;
     }
-    out += '\n';
+
+    const imgs = sheet.images ?? [];
+    if (imgs.length) {
+      texto += `\nRespaldo incrustado en la hoja "${sheet.name}" (${imgs.length} imagen(es)), a continuación:\n`;
+      bloques.push({ type: 'text', text: texto });
+      texto = '';
+      for (const img of imgs) {
+        bloques.push({ type: 'image', source: { type: 'base64', media_type: img.mediaType, data: img.data } });
+      }
+      texto += `(fin del respaldo de "${sheet.name}")\n`;
+    }
+
+    texto += '\n';
   }
 
-  return out;
+  if (texto.trim()) bloques.push({ type: 'text', text: texto });
+  return bloques;
 }
 
 // ─── Consolidación ───────────────────────────────────────────────────────────
@@ -301,8 +338,9 @@ export function formatFindingsForConsolidation(findings) {
     const porEstado = agrupar(partidas, p => p.estado);
     for (const [estado, items] of Object.entries(porEstado)) {
       out += `── ${estado} (${items.length} hoja/s) ──\n`;
-      // Las hojas correctas no necesitan detallarse una por una.
-      const muestra = estado === 'Correcta' ? items.slice(0, 8) : items.slice(0, 60);
+      // Las hojas sin reparos no necesitan detallarse una por una.
+      const limpia = estado === 'Correcta' || estado === 'Medida en software';
+      const muestra = limpia ? items.slice(0, 8) : items.slice(0, 60);
       for (const p of muestra) {
         out += `· [${p.item}] ${p.hoja}: ${p.hallazgo}\n`;
       }

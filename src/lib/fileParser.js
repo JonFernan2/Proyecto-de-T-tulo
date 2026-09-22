@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
 import JSZip from 'jszip';
-import { contarImagenesIncrustadas } from './xlsxImages.js';
+import { extraerImagenesIncrustadas } from './xlsxImages.js';
 import * as pdfjsLib from 'pdfjs-dist';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -19,10 +19,10 @@ export async function parseExcel(file) {
     cellDates: true,
   });
 
-  // SheetJS no ve las imágenes incrustadas, y muchos estudiantes pegan ahí el
-  // respaldo de sus cubicaciones. Sin esto la revisión concluiría que no hay
-  // respaldo cuando sí lo hay, solo que dentro de la hoja.
-  const imagenesPorHoja = await contarImagenesIncrustadas(arrayBuffer);
+  // SheetJS no ve las imágenes incrustadas, y ahí es donde muchos estudiantes
+  // dejan el respaldo: capturas de AutoCAD con el área medida. Ese número es el
+  // que debe coincidir con el total de la hoja.
+  const imagenesPorHoja = await extraerImagenesIncrustadas(arrayBuffer);
 
   const sheets = wb.SheetNames.map(name => {
     const ws = wb.Sheets[name];
@@ -50,7 +50,8 @@ export async function parseExcel(file) {
       name,
       rows,
       totalRows: range.e.r - range.s.r + 1,
-      embeddedImages: imagenesPorHoja[name] ?? 0,
+      images: imagenesPorHoja[name] ?? [],
+      embeddedImages: (imagenesPorHoja[name] ?? []).length,
     };
   });
 

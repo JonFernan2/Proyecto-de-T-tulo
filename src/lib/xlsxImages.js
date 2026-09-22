@@ -1,11 +1,22 @@
 import JSZip from 'jszip';
 
+// La API solo acepta estos formatos. Un .xlsx puede traer además emf/wmf
+// (gráficos vectoriales de Office), que se descartan.
+const TIPOS = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+};
+
 /**
- * Cuenta las imágenes incrustadas en cada hoja de un .xlsx.
+ * Extrae las imágenes incrustadas de cada hoja de un .xlsx.
  *
- * SheetJS lee celdas y fórmulas pero no ve las imágenes, y muchos estudiantes
- * pegan ahí el respaldo de sus cubicaciones. Sin esto la revisión concluiría
- * que no hay respaldo cuando sí lo hay, solo que dentro de la hoja.
+ * SheetJS lee celdas y fórmulas pero no ve las imágenes, y ahí es donde muchos
+ * estudiantes dejan el respaldo de sus cubicaciones: capturas de AutoCAD con el
+ * área o la longitud medida en el panel de propiedades. Ese número es el que
+ * debe coincidir con el total de la hoja.
  *
  * Un .xlsx es un zip y la cadena que une una hoja con sus imágenes es:
  *   workbook.xml (nombre de hoja → r:id)
@@ -14,11 +25,16 @@ import JSZip from 'jszip';
  *         → worksheets/_rels/sheetN.xml.rels (r:id → ../drawings/drawingM.xml)
  *           → drawings/_rels/drawingM.xml.rels (→ ../media/imagenK.png)
  *
- * Devuelve { [nombreHoja]: cantidad }. Ante cualquier problema devuelve {}:
- * no contar imágenes es aceptable, romper el parseo del libro no.
+ * Devuelve { [hoja]: [{ data, mediaType }] } con la imagen ya en base64.
+ * Ante cualquier problema devuelve {}: no ver las imágenes es aceptable,
+ * romper el parseo del libro no.
  */
-export async function contarImagenesIncrustadas(arrayBuffer) {
+export async function extraerImagenesIncrustadas(arrayBuffer, opciones = {}) {
+  const { maxPorHoja = 3, maxTotal = 300, maxLado = 1400 } = opciones;
+
   const porHoja = {};
+  let total = 0;
+
   try {
     const zip = await JSZip.loadAsync(arrayBuffer);
     const leer = async ruta => (zip.file(ruta) ? zip.file(ruta).async('string') : null);
@@ -36,30 +52,98 @@ export async function contarImagenesIncrustadas(arrayBuffer) {
       if (name === undefined || !rid) continue;
 
       const hoja = decodificarXml(name);
-      porHoja[hoja] = 0;
+      porHoja[hoja] = [];
 
-      const destino = wbRels[rid];
-      if (!destino) continue;
+      if (total >= maxTotal) continue;
 
-      const rutaHoja = resolverRuta('xl/workbook.xml', destino);
-      const hojaXml = await leer(rutaHoja);
-      const ridDibujo = hojaXml?.match(/<drawing\b[^>]*r:id="([^"]+)"/)?.[1];
-      if (!ridDibujo) continue;
-
-      const relsHoja = parsearRels(await leer(rutaRels(rutaHoja)));
-      const destinoDibujo = relsHoja[ridDibujo];
-      if (!destinoDibujo) continue;
-
-      const rutaDibujo = resolverRuta(rutaHoja, destinoDibujo);
-      const relsDibujo = await leer(rutaRels(rutaDibujo));
-      if (!relsDibujo) continue;
-
-      porHoja[hoja] = (relsDibujo.match(/Target="[^"]*media\/[^"]+"/g) ?? []).length;
+      const rutas = await rutasDeImagenes(zip, leer, wbRels, rid);
+      for (const ruta of rutas.slice(0, maxPorHoja)) {
+        if (total >= maxTotal) break;
+        const img = await procesarImagen(zip, ruta, maxLado);
+        if (img) { porHoja[hoja].push(img); total++; }
+      }
     }
   } catch (err) {
-    console.warn('[xlsx] No se pudieron contar las imágenes incrustadas:', err.message);
+    console.warn('[xlsx] No se pudieron extraer las imágenes incrustadas:', err.message);
   }
+
   return porHoja;
+}
+
+async function rutasDeImagenes(zip, leer, wbRels, rid) {
+  const destino = wbRels[rid];
+  if (!destino) return [];
+
+  const rutaHoja = resolverRuta('xl/workbook.xml', destino);
+  const hojaXml = await leer(rutaHoja);
+  const ridDibujo = hojaXml?.match(/<drawing\b[^>]*r:id="([^"]+)"/)?.[1];
+  if (!ridDibujo) return [];
+
+  const relsHoja = parsearRels(await leer(rutaRels(rutaHoja)));
+  const destinoDibujo = relsHoja[ridDibujo];
+  if (!destinoDibujo) return [];
+
+  const rutaDibujo = resolverRuta(rutaHoja, destinoDibujo);
+  const relsDibujo = await leer(rutaRels(rutaDibujo));
+  if (!relsDibujo) return [];
+
+  return Object.values(parsearRels(relsDibujo))
+    .filter(t => /media\//.test(t))
+    .map(t => resolverRuta(rutaDibujo, t));
+}
+
+async function procesarImagen(zip, ruta, maxLado) {
+  const archivo = zip.file(ruta);
+  if (!archivo) return null;
+
+  const mediaType = TIPOS[ruta.split('.').pop().toLowerCase()];
+  if (!mediaType) return null;
+
+  // Las capturas de AutoCAD suelen venir a resolución de pantalla completa.
+  // Reducirlas baja el peso del envío y el costo sin perder legibilidad de las
+  // cifras del panel de propiedades, que es lo que hay que leer.
+  const reducida = await reducir(archivo, mediaType, maxLado);
+  if (reducida) return reducida;
+
+  return { data: await archivo.async('base64'), mediaType };
+}
+
+/**
+ * Reduce la imagen con canvas. Solo existe en el navegador; en Node devuelve
+ * null y se usa la original, que es lo que permite probar esto fuera del browser.
+ */
+async function reducir(archivo, mediaType, maxLado) {
+  if (typeof createImageBitmap !== 'function' || typeof OffscreenCanvas !== 'function') return null;
+
+  try {
+    const blob = new Blob([await archivo.async('uint8array')], { type: mediaType });
+    const bitmap = await createImageBitmap(blob);
+
+    const escala = Math.min(1, maxLado / Math.max(bitmap.width, bitmap.height));
+    if (escala === 1 && blob.size < 400_000) { bitmap.close?.(); return null; }
+
+    const ancho = Math.round(bitmap.width * escala);
+    const alto = Math.round(bitmap.height * escala);
+
+    const canvas = new OffscreenCanvas(ancho, alto);
+    const ctx = canvas.getContext('2d');
+    // Fondo blanco: los PNG con transparencia saldrían negros al pasar a JPEG.
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, ancho, alto);
+    ctx.drawImage(bitmap, 0, 0, ancho, alto);
+    bitmap.close?.();
+
+    const salida = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.82 });
+    const buf = new Uint8Array(await salida.arrayBuffer());
+
+    let binario = '';
+    for (let i = 0; i < buf.length; i += 8192) {
+      binario += String.fromCharCode(...buf.subarray(i, i + 8192));
+    }
+    return { data: btoa(binario), mediaType: 'image/jpeg' };
+  } catch {
+    return null;
+  }
 }
 
 function parsearRels(xml) {

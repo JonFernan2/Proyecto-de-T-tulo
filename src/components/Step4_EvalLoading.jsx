@@ -129,6 +129,9 @@ export default function Step4_EvalLoading() {
                 <span className="text-slate-700">{ETIQUETAS[p.kind] ?? p.kind}</span>
                 <span className="text-slate-500">
                   {p.sheets} hojas · {p.batches} tandas
+                  {p.conImagenes > 0 && (
+                    <span className="text-uvm-blue"> · {p.conImagenes} con respaldo</span>
+                  )}
                 </span>
               </div>
             ))}
