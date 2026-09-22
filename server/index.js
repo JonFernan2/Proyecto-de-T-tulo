@@ -220,14 +220,25 @@ app.get('/api/deep-review/status', async (req, res) => {
   try {
     const batch = await anthropic.messages.batches.retrieve(req.query.batchId);
     const c = batch.request_counts ?? {};
+    const listas = c.succeeded ?? 0;
+    const conError = (c.errored ?? 0) + (c.canceled ?? 0) + (c.expired ?? 0);
+
+    // Se registra cada consulta: sin esto no hay forma de saber desde el CMD si
+    // la revisión avanza o si quedó detenida.
+    const ctx = revisiones.get(req.query.batchId);
+    const transcurrido = ctx ? Math.round((Date.now() - ctx.creado) / 1000) : 0;
+    console.log(
+      `[deep-review] ${ctx?.studentName ?? req.query.batchId}: ${batch.processing_status} · ` +
+      `${listas} listas · ${c.processing ?? 0} en curso` +
+      `${conError ? ` · ${conError} con error` : ''} · ${transcurrido}s`,
+    );
+
     res.json({
       ok: true,
       status: batch.processing_status,          // in_progress | canceling | ended
-      counts: {
-        procesando: c.processing ?? 0,
-        listas: c.succeeded ?? 0,
-        conError: (c.errored ?? 0) + (c.canceled ?? 0) + (c.expired ?? 0),
-      },
+      batchId: req.query.batchId,
+      transcurrido,
+      counts: { procesando: c.processing ?? 0, listas, conError },
     });
   } catch (err) {
     console.error('[deep-review/status] ERROR:', err.message);

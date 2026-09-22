@@ -18,6 +18,14 @@ export default function Step4_EvalLoading() {
   const started = useRef(false);
   const cancelado = useRef(false);
 
+  // Reloj propio: el Batch API puede pasar minutos sin mover el contador de
+  // tandas, y sin nada que cambie en pantalla la revisión parece colgada.
+  const [segundos, setSegundos] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setSegundos(s => s + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
+
   useEffect(() => {
     if (started.current) return;
     started.current = true;
@@ -190,9 +198,22 @@ export default function Step4_EvalLoading() {
               detalle="Notas por criterio y cuadro resumen" />
       </div>
 
-      <div className="text-xs text-slate-400 text-center leading-relaxed">
-        La revisión completa tarda varios minutos porque se lee cada hoja del libro,
-        no una muestra. Puedes dejar esta pestaña abierta y volver después.
+      <div className="text-xs text-slate-400 text-center leading-relaxed space-y-1">
+        <div>
+          Tiempo transcurrido: <span className="font-mono text-slate-600">{formatoReloj(segundos)}</span>
+          {progress.ultimaConsulta && (
+            <> · consultado hace {Math.max(0, Math.round((Date.now() - progress.ultimaConsulta) / 1000))}s</>
+          )}
+        </div>
+        <div>
+          La revisión completa tarda varios minutos porque se lee cada hoja del libro,
+          no una muestra. Puedes dejar esta pestaña abierta y volver después.
+        </div>
+        {progress.batchId && (
+          <div className="font-mono text-[10px] text-slate-300">
+            lote {progress.batchId}
+          </div>
+        )}
       </div>
 
       <div className="text-center">
@@ -205,6 +226,11 @@ export default function Step4_EvalLoading() {
       </div>
     </div>
   );
+}
+
+function formatoReloj(s) {
+  const m = Math.floor(s / 60);
+  return `${m}:${String(s % 60).padStart(2, '0')}`;
 }
 
 function Fase({ n, activa, lista, titulo, detalle }) {

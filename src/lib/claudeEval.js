@@ -48,7 +48,12 @@ export async function deepReview({ delivery, studentName, filesMap, admissibilit
     const status = await statusRes.json();
     if (!status.ok) throw new Error(status.error ?? 'Error consultando el avance.');
 
-    onProgress?.({ fase: 'revisando', plan, totalTandas, counts: status.counts });
+    onProgress?.({
+      fase: 'revisando', plan, totalTandas,
+      counts: status.counts,
+      batchId,
+      ultimaConsulta: Date.now(),
+    });
 
     if (status.status === 'ended') {
       // Terminó, pero puede haber terminado mal: si ninguna tanda salió bien,
