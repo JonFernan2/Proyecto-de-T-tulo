@@ -196,6 +196,9 @@ app.get('/api/deep-review/pendientes', async (_req, res) => {
         plan: ctx.plan,
         creado: ctx.creado,
         totalTandas: (ctx.plan ?? []).reduce((n, p) => n + (p.batches ?? 0), 0),
+        // Al retomar tras cerrar la aplicación, esta es la única copia que
+        // queda de la admisibilidad, y el informe la imprime.
+        admissibility: ctx.payload?.admissibility ?? null,
       };
 
       // Ya consolidada: no hace falta consultar la API, el resultado está aquí.
@@ -250,6 +253,7 @@ app.get('/api/deep-review/resultado', (req, res) => {
     delivery: ctx.delivery,
     evaluation: ctx.evaluation,
     cobertura: ctx.cobertura ?? null,
+    admissibility: ctx.payload?.admissibility ?? null,
   });
 });
 
@@ -499,7 +503,11 @@ app.post('/api/deep-review/finish', async (req, res) => {
     guardarResultado(batchId, { evaluation: toolUse.input, cobertura });
     revisiones.set(batchId, {
       ...ctx, estado: 'completada', completado: Date.now(),
-      evaluation: toolUse.input, cobertura, payload: { eett: ctx.payload?.eett ?? null },
+      evaluation: toolUse.input, cobertura,
+      payload: {
+        eett: ctx.payload?.eett ?? null,
+        admissibility: ctx.payload?.admissibility ?? null,
+      },
     });
 
     console.log(`[deep-review] ${ctx.studentName}: consolidado · ${totales.hojas} hojas · ${totales.errores} con errores`);

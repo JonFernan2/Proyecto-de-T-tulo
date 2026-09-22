@@ -40,7 +40,10 @@ export default function RevisionesPendientes() {
   function retomar(p) {
     setDelivery(p.delivery);
     setStudentName(p.studentName);
-    useGradingStore.setState({ revisionPendiente: p });
+    // La admisibilidad se calculó al lanzar la revisión y vive en el servidor:
+    // sin recuperarla, una revisión retomada tras cerrar la aplicación llega a
+    // los resultados sin ella y el informe no se puede exportar.
+    useGradingStore.setState({ revisionPendiente: p, admissibility: p.admissibility ?? null });
     goTo('evaluating');
   }
 

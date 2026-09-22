@@ -55,15 +55,19 @@ export function generateFeedbackPDF({ delivery, studentName, admissibility, crit
   doc.text(`${delivLabel}`, 18, y + 12);
   doc.text(`Fecha: ${new Date().toLocaleDateString('es-CL')}`, W - 50, y + 6);
 
-  // Admissibility badge
-  const admBadgeColor = admissibility.passed ? [22, 163, 74] : [220, 38, 38];
-  const admLabel = admissibility.passed ? 'ADMISIBLE' : 'INADMISIBLE';
-  doc.setFillColor(...admBadgeColor);
-  doc.roundedRect(W - 65, y + 9, 30, 6, 2, 2, 'F');
-  doc.setTextColor(...WHITE);
-  doc.setFontSize(7);
-  doc.setFont('helvetica', 'bold');
-  doc.text(admLabel, W - 50, y + 13.5, { align: 'center' });
+  // Admisibilidad: una revisión reabierta o retomada puede no traerla, y en ese
+  // caso no se inventa un veredicto — se omite el sello y se dice por qué.
+  const admResults = admissibility?.results ?? [];
+  if (typeof admissibility?.passed === 'boolean') {
+    const admBadgeColor = admissibility.passed ? [22, 163, 74] : [220, 38, 38];
+    const admLabel = admissibility.passed ? 'ADMISIBLE' : 'INADMISIBLE';
+    doc.setFillColor(...admBadgeColor);
+    doc.roundedRect(W - 65, y + 9, 30, 6, 2, 2, 'F');
+    doc.setTextColor(...WHITE);
+    doc.setFontSize(7);
+    doc.setFont('helvetica', 'bold');
+    doc.text(admLabel, W - 50, y + 13.5, { align: 'center' });
+  }
 
   y += 24;
 
@@ -74,33 +78,46 @@ export function generateFeedbackPDF({ delivery, studentName, admissibility, crit
   doc.text('Verificación de Admisibilidad', 14, y);
   y += 4;
 
-  autoTable(doc, {
-    startY: y,
-    head: [['Criterio', 'Resultado', 'Detalle']],
-    body: admissibility.results.map(r => [
-      r.label,
-      r.passed ? '✓ OK' : '✗ FALLA',
-      r.detail,
-    ]),
-    theme: 'grid',
-    headStyles: { fillColor: BLUE, textColor: WHITE, fontSize: 8, fontStyle: 'bold' },
-    bodyStyles: { fontSize: 8 },
-    columnStyles: {
-      0: { cellWidth: 60 },
-      1: { cellWidth: 20, halign: 'center' },
-      2: { cellWidth: 'auto' },
-    },
-    didParseCell(data) {
-      if (data.column.index === 1 && data.section === 'body') {
-        const passed = data.cell.text[0]?.startsWith('✓');
-        data.cell.styles.textColor = passed ? [22, 163, 74] : [220, 38, 38];
-        data.cell.styles.fontStyle = 'bold';
-      }
-    },
-    margin: { left: 14, right: 14 },
-  });
+  if (!admResults.length) {
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(8);
+    doc.text(
+      'No se registró la verificación de admisibilidad de esta entrega.',
+      14, y + 4,
+    );
+    y += 12;
+  } else {
+    autoTable(doc, {
+      startY: y,
+      head: [['Criterio', 'Resultado', 'Detalle']],
+      body: admResults.map(r => [
+        r.label,
+        // Sin veredicto guardado se deja en blanco: marcar FALLA por defecto
+        // imprimiría en el informe del estudiante algo que no se verificó.
+        typeof r.passed === 'boolean' ? (r.passed ? '✓ OK' : '✗ FALLA') : '—',
+        r.detail,
+      ]),
+      theme: 'grid',
+      headStyles: { fillColor: BLUE, textColor: WHITE, fontSize: 8, fontStyle: 'bold' },
+      bodyStyles: { fontSize: 8 },
+      columnStyles: {
+        0: { cellWidth: 60 },
+        1: { cellWidth: 20, halign: 'center' },
+        2: { cellWidth: 'auto' },
+      },
+      didParseCell(data) {
+        if (data.column.index === 1 && data.section === 'body') {
+          const texto = data.cell.text[0] ?? '';
+          if (texto === '—') { data.cell.styles.textColor = [150, 150, 150]; return; }
+          data.cell.styles.textColor = texto.startsWith('✓') ? [22, 163, 74] : [220, 38, 38];
+          data.cell.styles.fontStyle = 'bold';
+        }
+      },
+      margin: { left: 14, right: 14 },
+    });
 
-  y = doc.lastAutoTable.finalY + 6;
+    y = doc.lastAutoTable.finalY + 6;
+  }
 
   // ── Cuadro resumen de la revisión ────────────────────────────────────────────
   if (resumen.length) {

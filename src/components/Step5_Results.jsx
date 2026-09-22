@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useGradingStore } from '../store/useGradingStore.js';
 import { DELIVERIES, GRADE_COLORS } from '../lib/rubric.js';
 import CriterionCard from './CriterionCard.jsx';
@@ -22,6 +22,9 @@ export default function Step5_Results() {
     globalJustificationEdit, setGlobalJustification,
     reset,
   } = useGradingStore();
+
+  // Antes del retorno temprano: los hooks no pueden quedar tras una condición.
+  const [exportError, setExportError] = useState(null);
 
   if (!evaluation) return null;
 
@@ -62,18 +65,26 @@ export default function Step5_Results() {
   }
 
   function handleExport() {
-    generateFeedbackPDF({
-      delivery,
-      studentName,
-      admissibility,
-      criteria,
-      globalScore: finalGlobal,
-      globalJustification: justificacion,
-      globalObservation,
-      resumen: evaluation.resumen ?? [],
-      fortalezas: evaluation.fortalezas ?? [],
-      mejoras: evaluation.mejoras ?? [],
-    });
+    setExportError(null);
+    try {
+      generateFeedbackPDF({
+        delivery,
+        studentName,
+        admissibility,
+        criteria,
+        globalScore: finalGlobal,
+        globalJustification: justificacion,
+        globalObservation,
+        resumen: evaluation.resumen ?? [],
+        fortalezas: evaluation.fortalezas ?? [],
+        mejoras: evaluation.mejoras ?? [],
+      });
+    } catch (err) {
+      // Sin esto el botón no hacía nada visible y el motivo se quedaba en la
+      // consola del navegador.
+      console.error('[export]', err);
+      setExportError(err.message ?? String(err));
+    }
   }
 
   return (
@@ -256,6 +267,13 @@ export default function Step5_Results() {
           className="w-full text-sm border border-slate-300 rounded-xl px-4 py-3 resize-none focus:outline-none focus:ring-2 focus:ring-uvm-blue"
         />
       </div>
+
+      {exportError && (
+        <div className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+          <div className="font-semibold">No se pudo generar el PDF</div>
+          <div className="text-xs mt-1 font-mono break-words">{exportError}</div>
+        </div>
+      )}
 
       {/* Actions */}
       <div className="flex gap-3">

@@ -91,7 +91,7 @@ export const useGradingStore = create((set, get) => ({
    * guardadas en el servidor y se recuperan por su lote, así que ajustar notas
    * y exportar no obliga a volver a subir nada ni a pagar la revisión de nuevo.
    */
-  abrirResultado({ studentName, delivery, evaluation, cobertura }) {
+  abrirResultado({ studentName, delivery, evaluation, cobertura, admissibility }) {
     const ajustes = {};
     for (const c of evaluation.criteria ?? []) {
       ajustes[c.id] = { score: c.score, observation: '' };
@@ -101,7 +101,7 @@ export const useGradingStore = create((set, get) => ({
       delivery,
       studentName,
       uploadedFiles: [],
-      admissibility: null,
+      admissibility: admissibility ?? null,
       revisionPendiente: null,
       evaluation: { ...evaluation, cobertura },
       evalError: null,

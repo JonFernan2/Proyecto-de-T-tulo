@@ -45,8 +45,12 @@ export function guardarResultado(batchId, { evaluation, cobertura }) {
     completado: Date.now(),
     evaluation,
     cobertura,
-    // El payload ya cumplió su función en la consolidación.
-    payload: { eett: previo.payload?.eett ?? null },
+    // El payload ya cumplió su función en la consolidación. Se conserva la
+    // admisibilidad porque el informe la imprime al reabrir la revisión.
+    payload: {
+      eett: previo.payload?.eett ?? null,
+      admissibility: previo.payload?.admissibility ?? null,
+    },
   });
 }
 

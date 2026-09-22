@@ -175,8 +175,20 @@ function buildPayload({ filesMap, admissibility }) {
     apu: filesMap.apu ?? null,
     pdfNames: filesMap.respaldoPdfNames ?? [],
     respaldoPdfs: filesMap.respaldoPdfs ?? [],
+    // Se guarda entera, no solo label+detail: al retomar una revisión lanzada
+    // antes de cerrar la aplicación, esta es la única copia que queda, y el
+    // informe la imprime.
     admissibility: admissibility
-      ? { results: admissibility.results.map(r => ({ label: r.label, detail: r.detail })) }
+      ? {
+          passed: admissibility.passed,
+          results: admissibility.results.map(r => ({
+            id: r.id,
+            label: r.label,
+            detail: r.detail,
+            passed: r.passed,
+            ...(r.forceScore !== undefined ? { forceScore: r.forceScore } : {}),
+          })),
+        }
       : null,
   };
 }
