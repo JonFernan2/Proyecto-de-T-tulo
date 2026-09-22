@@ -270,6 +270,49 @@ app.get('/api/deep-review/errores', async (req, res) => {
   }
 });
 
+// Ver los hallazgos crudos de cualquier lote terminado, aunque su contexto ya
+// no esté. Los resultados viven 29 días del lado de la API: sin esto, descartar
+// una revisión por error dejaba inaccesible un trabajo ya pagado.
+app.get('/api/deep-review/hallazgos', async (req, res) => {
+  try {
+    const findings = [];
+    let total = 0;
+    let fallidas = 0;
+
+    for await (const entry of await anthropic.messages.batches.results(req.query.batchId)) {
+      total++;
+      if (entry.result?.type !== 'succeeded') { fallidas++; continue; }
+      const toolUse = entry.result.message.content.find(b => b.type === 'tool_use');
+      if (toolUse) findings.push({ custom_id: entry.custom_id, result: toolUse.input });
+      else fallidas++;
+    }
+
+    if (!findings.length) {
+      return res.status(404).json({
+        ok: false,
+        error: `El lote tiene ${total} tanda(s) y ninguna con resultados utilizables.`,
+      });
+    }
+
+    const { texto, totales } = formatFindingsForConsolidation(findings);
+    const ctx = revisiones.get(req.query.batchId);
+
+    const cabecera =
+      `HALLAZGOS DEL LOTE ${req.query.batchId}\n` +
+      (ctx ? `Estudiante: ${ctx.studentName} — ${ctx.delivery}\n` : '') +
+      `Tandas: ${findings.length} de ${total} recogidas` +
+      (fallidas ? ` (${fallidas} sin resultado)` : '') + `\n` +
+      `Hojas revisadas: ${totales.hojas} · con errores de cálculo: ${totales.errores} · ` +
+      `sin fórmulas visibles: ${totales.sinFormula}\n` +
+      '═'.repeat(70) + '\n';
+
+    res.type('text/plain; charset=utf-8').send(cabecera + texto);
+  } catch (err) {
+    console.error('[deep-review/hallazgos] ERROR:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Descartar una revisión que ya no sirve (lote caducado o relanzada).
 app.delete('/api/deep-review/pendientes', (req, res) => {
   const { batchId } = req.query;
