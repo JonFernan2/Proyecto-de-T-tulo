@@ -46,6 +46,23 @@ function guessRole(file, delivery) {
   return 'respaldo';
 }
 
+/**
+ * Agrupa los archivos por carpeta de estudiante cuando se eligió la carpeta del
+ * curso completo: las rutas llegan como CURSO/ALUMNO/archivo.
+ * Devuelve null si los archivos vienen de una sola carpeta o sueltos.
+ */
+function agruparPorEstudiante(archivos) {
+  const grupos = new Map();
+  for (const f of archivos) {
+    const partes = (f.webkitRelativePath ?? '').split('/');
+    if (partes.length < 3) return null;        // no es una carpeta de carpetas
+    const alumno = partes[partes.length - 2];
+    if (!grupos.has(alumno)) grupos.set(alumno, []);
+    grupos.get(alumno).push(f);
+  }
+  return grupos;
+}
+
 function fileTypeIcon(file) {
   const ext = file.name.split('.').pop().toLowerCase();
   if (ext === 'docx' || ext === 'doc') return '📄';
@@ -59,6 +76,7 @@ export default function Step2_FileUpload() {
   const { delivery, studentName, setStudentName, uploadedFiles, addFiles, removeFile, updateFileRole, setParsed, goTo } = useGradingStore();
   const [parsing, setParsing] = useState({});  // { fileId: true }
   const carpetaRef = useRef(null);
+  const [carpetas, setCarpetas] = useState(null);  // curso completo detectado
   const expectedFiles = DELIVERIES[delivery]?.expectedFiles ?? [];
   const roleOptions = delivery === 'E2' ? ROLE_OPTIONS_E2 : ROLE_OPTIONS_E1;
 
@@ -87,8 +105,10 @@ export default function Step2_FileUpload() {
     }
   }, [setParsed]);
 
-  const onDrop = useCallback(async (acceptedFiles) => {
-    const newEntries = acceptedFiles.map(f => ({
+  const cargar = useCallback((archivos) => {
+    setCarpetas(null);
+
+    const newEntries = archivos.map(f => ({
       id: `${Date.now()}_${Math.random().toString(36).slice(2)}`,
       file: f,
       role: guessRole(f, delivery),
@@ -100,19 +120,31 @@ export default function Step2_FileUpload() {
     // Al elegir una carpeta, su nombre identifica al estudiante mejor que el
     // del primer archivo, que suele traer el nombre del proyecto.
     if (!studentName.trim() && newEntries.length > 0) {
-      const ruta = newEntries[0].file.webkitRelativePath ?? '';
-      const carpeta = ruta.split('/')[0];
+      const partes = (newEntries[0].file.webkitRelativePath ?? '').split('/');
+      const carpeta = partes.length >= 2 ? partes[partes.length - 2] : '';
       const detected = carpeta
         ? detectStudentName(carpeta)
         : detectStudentName(newEntries[0].file.name);
       if (detected) setStudentName(detected);
     }
 
-    // Parse in background
     for (const entry of newEntries) {
       parseFile(entry.id, entry.file, entry.role);
     }
   }, [addFiles, delivery, parseFile, studentName, setStudentName]);
+
+  const onDrop = useCallback(async (acceptedFiles) => {
+    // Si se eligió la carpeta del curso en vez de la de un estudiante, los
+    // archivos vienen como CURSO/ALUMNO/archivo. Cargarlos todos juntos
+    // mezclaría a los estudiantes en una sola revisión sin avisar.
+    const porCarpeta = agruparPorEstudiante(acceptedFiles);
+    if (porCarpeta && porCarpeta.size > 1) {
+      setCarpetas(porCarpeta);
+      return;
+    }
+
+    cargar(acceptedFiles);
+  }, [cargar]);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop, multiple: true });
 
@@ -153,6 +185,42 @@ export default function Step2_FileUpload() {
           })}
         </div>
       </div>
+
+      {/* Se eligió la carpeta del curso: hay que elegir a quién revisar, porque
+          cargarlos todos mezclaría a los estudiantes en una sola corrección. */}
+      {carpetas && (
+        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 space-y-3">
+          <div>
+            <div className="text-sm font-bold text-slate-800">
+              Se detectaron {carpetas.size} carpetas de estudiantes
+            </div>
+            <div className="text-xs text-slate-600 mt-0.5">
+              Las correcciones son de a un estudiante por vez. Elige a quién revisar ahora.
+            </div>
+          </div>
+
+          <div className="max-h-72 overflow-y-auto space-y-1.5">
+            {[...carpetas.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([alumno, archivos]) => (
+              <button
+                key={alumno}
+                onClick={() => cargar(archivos)}
+                className="w-full text-left bg-white border border-blue-100 rounded-lg px-3 py-2
+                  hover:border-uvm-blue hover:shadow-sm transition-all flex items-center justify-between gap-3"
+              >
+                <span className="text-sm font-medium text-slate-800 truncate">{alumno}</span>
+                <span className="text-xs text-slate-400 shrink-0">{archivos.length} archivos</span>
+              </button>
+            ))}
+          </div>
+
+          <button
+            onClick={() => setCarpetas(null)}
+            className="text-xs text-slate-500 hover:text-slate-700 underline underline-offset-2"
+          >
+            Cancelar
+          </button>
+        </div>
+      )}
 
       {/* Drop zone */}
       <div
