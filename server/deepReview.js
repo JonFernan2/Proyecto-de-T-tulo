@@ -163,6 +163,18 @@ Por cada hoja de esta tanda:
    de WC es un error.
 6. Marca "Incompleta" si faltan partidas del listado que esa hoja debería cubrir.
 
+EL RESPALDO ADMITE VARIAS FORMAS Y NINGUNA VALE MENOS QUE OTRA.
+La pauta exige que el cálculo quede respaldado, no que lo esté de una manera
+concreta. Un estudiante puede dejarlo:
+- como imágenes incrustadas en la propia hoja (aparecen anotadas arriba de la hoja);
+- desarrollado con fórmulas en las mismas celdas;
+- escrito en filas anexas dentro de la hoja;
+- o en archivos aparte (PDF escaneado, fotos del cuaderno de cubicaciones).
+Nunca escribas que falta respaldo solo porque no lo ves en el formato que
+esperabas. Si la hoja trae imágenes incrustadas o el cálculo desarrollado,
+el respaldo está. Solo señala falta de respaldo cuando la hoja entregue
+resultados sin fórmula, sin desarrollo y sin imagen alguna.
+
 NO penalices la ausencia de Instalaciones Eléctricas, CCDD, CCTV, Clima,
 Ascensores ni Redes de Gases: la pauta las excluye en proyectos de Edificación.`;
 
@@ -177,6 +189,11 @@ Por cada hoja de esta tanda:
    actividades del listado. Señala materiales del listado que no aparecen
    cotizados.
 4. Revisa que se indique el nombre del archivo PDF de respaldo por cotización.
+   El respaldo admite tres formas y ninguna vale menos que otra: PDFs adjuntos
+   aparte, imágenes incrustadas en la propia hoja (van anotadas arriba de cada
+   hoja), o pegado dentro de la misma planilla. Si la hoja trae imágenes
+   incrustadas, el respaldo existe aunque no haya PDFs sueltos. Señala falta
+   de respaldo solo cuando no se dé ninguna de las tres.
 5. Las cotizaciones deben ser del año académico en curso. Si aparece un año
    anterior, señálalo; si no hay año visible, dilo como dato faltante y no
    como incumplimiento.
@@ -216,6 +233,11 @@ function formatSheetsChunk(sheets, kind, n, total) {
 
   for (const sheet of sheets) {
     out += `━━━ HOJA: ${sheet.name} ━━━\n`;
+    if (sheet.embeddedImages > 0) {
+      out += `[Esta hoja tiene ${sheet.embeddedImages} imagen(es) incrustada(s): el respaldo `
+           + `del cálculo va dentro de la propia hoja. No las ves, pero EXISTEN — `
+           + `no afirmes que falta respaldo en esta partida.]\n`;
+    }
     const rows = sheet.rows ?? [];
     for (const row of rows.slice(0, MAX_ROWS_PER_SHEET)) {
       const cells = row

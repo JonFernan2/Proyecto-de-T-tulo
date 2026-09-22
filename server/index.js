@@ -419,7 +419,7 @@ function buildUserContent(delivery, studentName, payload) {
   text += getRubric(delivery);
   text += cargarReferencias().texto;
   text += '\n\n---\n\n';
-  text += formatHechos(admissibility, { cubicaciones, cotizaciones, cotizacionesFiles, apu, pdfNames });
+  text += formatHechos(admissibility, { cubicaciones, listado, cotizaciones, cotizacionesFiles, apu, pdfNames });
   text += `IMPORTANTE: Cada bloque <seccion> corresponde a un DOCUMENTO DISTINTO del estudiante.
 No mezcles información entre secciones. Al citar un dato, indica explícitamente de qué sección proviene.
 La sección LISTADO es la referencia base para la evaluación cruzada.\n\n`;
@@ -518,9 +518,18 @@ function formatHechos(admissibility, files) {
 
   const inv = [];
   if (files.cubicaciones?.sheets?.length) {
+    const incr = files.cubicaciones.totalEmbeddedImages ?? 0;
     inv.push(`- Excel de cubicaciones: ENTREGADO (${files.cubicaciones.sheets.length} hojas)`);
+    if (incr > 0) {
+      inv.push(`- Respaldo DENTRO de las hojas de cubicaciones: ${incr} imagen(es) incrustada(s). `
+             + 'El respaldo existe; no escribas que falta.');
+    }
   } else {
     inv.push('- Excel de cubicaciones: NO ENTREGADO');
+  }
+
+  if (files.listado?.sheets?.length) {
+    inv.push(`- Listado/Itemizado como archivo aparte: ENTREGADO (${files.listado.sheets.length} hojas)`);
   }
 
   if (files.cotizaciones?.sheets?.length) {
@@ -530,6 +539,11 @@ function formatHechos(admissibility, files) {
     inv.push(wordCots.length
       ? `- Cotizaciones: ENTREGADAS en Word (${wordCots.length} archivos), no en Excel`
       : '- Excel de cotizaciones: NO ENTREGADO');
+  }
+
+  const incrCot = files.cotizaciones?.totalEmbeddedImages ?? 0;
+  if (incrCot > 0) {
+    inv.push(`- Respaldo DENTRO de las hojas de cotizaciones: ${incrCot} imagen(es) incrustada(s).`);
   }
 
   const nPdf = files.pdfNames?.length ?? 0;

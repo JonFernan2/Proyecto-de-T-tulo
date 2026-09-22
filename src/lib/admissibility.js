@@ -114,16 +114,25 @@ function checkCubicaciones(cub, nItems) {
 
   const ratio = Math.min(nSheets, nItems) / nItems;
   const cumple = ratio >= UMBRAL_CUBICACIONES;
+
+  // El respaldo del cálculo puede venir incrustado en las propias hojas, y eso
+  // cuenta igual que un archivo aparte.
+  const incrustadas = cub.totalEmbeddedImages ?? 0;
+  const respaldo = incrustadas > 0
+    ? ` ${incrustadas} imagen(es) de respaldo incrustadas en las hojas.`
+    : '';
+
   return {
     ...base,
     passed: true,
     detail:
       `${nSheets} hoja(s) de cubicaciones · ${nItems} actividad(es) en el listado ` +
       `(${pct(ratio)} cubicado). Exigencia mínima ${pct(UMBRAL_CUBICACIONES)}: ` +
-      `${cumple ? 'CUMPLE' : 'NO CUMPLE'}.`,
+      `${cumple ? 'CUMPLE' : 'NO CUMPLE'}.${respaldo}`,
     ratio,
     threshold: UMBRAL_CUBICACIONES,
     cumpleUmbral: cumple,
+    imagenesIncrustadas: incrustadas,
   };
 }
 
@@ -171,8 +180,10 @@ function checkCotizaciones(filesMap, nItems) {
 
   if (pdfNames.length) {
     notas.push(`${pdfNames.length} PDF(s) de respaldo adjunto(s).`);
+  } else if (excel?.totalEmbeddedImages > 0) {
+    notas.push(`${excel.totalEmbeddedImages} imagen(es) de respaldo incrustadas en las hojas.`);
   } else if (excel || wordFiles.length) {
-    notas.push('Sin PDFs de respaldo adjuntos.');
+    notas.push('Sin respaldo adjunto ni incrustado en las hojas.');
   }
 
   return {
