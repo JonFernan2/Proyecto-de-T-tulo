@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useGradingStore } from '../store/useGradingStore.js';
 import { deepReview, resumeDeepReview, verifyImages } from '../lib/claudeEval.js';
 import { DELIVERIES } from '../lib/rubric.js';
+import { ponderar } from '../lib/notas.js';
 
 const ETIQUETAS = {
   cub: 'Cubicaciones',
@@ -82,7 +83,7 @@ export default function Step4_EvalLoading() {
       }
 
       // ── Ajustes de admisibilidad ────────────────────────────────────────────
-      const { setAdjustment, setGlobalScore } = useGradingStore.getState();
+      const { setAdjustment, volverAlPonderado } = useGradingStore.getState();
       const forced = {};
       for (const r of admissibility?.results ?? []) {
         if (r.forceScore !== undefined) forced[r.id] = r.forceScore;
@@ -96,7 +97,16 @@ export default function Step4_EvalLoading() {
             : '');
       }
 
-      setGlobalScore(evaluation.globalScore);
+      // La nota final arranca en el promedio ponderado de las notas que quedaron
+      // puestas, no en la que propuso la revisión: si la admisibilidad forzó
+      // algún criterio al mínimo, esa propuesta ya no corresponde. Queda además
+      // siguiendo a los criterios, para que ajustar uno la actualice.
+      const ponderada = ponderar(DELIVERIES[delivery].criteria.map(rc => ({
+        weight: rc.weight,
+        score: forced[rc.id] ?? evaluation.criteria?.find(c => c.id === rc.id)?.score ?? 1.0,
+      })));
+      volverAlPonderado(ponderada ?? evaluation.globalScore);
+
       setEvaluation(evaluation);
       goTo('results');
     }

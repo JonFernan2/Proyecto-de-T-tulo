@@ -1,11 +1,12 @@
 import React from 'react';
 import { GRADE_COLORS } from '../lib/rubric.js';
-
-const GRADE_STEPS = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0];
+import { PASOS_NOTA, redondearNota, formatoNota } from '../lib/notas.js';
 
 export default function CriterionCard({ criterion, aiScore, aiJustification, professorScore, professorObservation, onScoreChange, onObsChange }) {
-  const sliderIndex = GRADE_STEPS.indexOf(professorScore);
   const displayScore = professorScore ?? aiScore;
+  // Las notas van de a 0,1: con medios puntos, ajustar un criterio de poco peso
+  // no movía la nota final y parecía que no reaccionaba.
+  const sliderIndex = PASOS_NOTA.indexOf(redondearNota(displayScore));
 
   return (
     <div className={`rounded-xl border p-5 ${GRADE_COLORS.getBg(displayScore)}`}>
@@ -39,18 +40,18 @@ export default function CriterionCard({ criterion, aiScore, aiJustification, pro
       <div className="space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-xs font-semibold text-slate-600 uppercase tracking-wide">Nota del docente</span>
-          <span className={`text-xl font-bold ${GRADE_COLORS.getColor(professorScore ?? aiScore)}`}>
-            {(professorScore ?? aiScore).toFixed(1).replace('.', ',')}
+          <span className={`text-xl font-bold ${GRADE_COLORS.getColor(displayScore)}`}>
+            {formatoNota(displayScore)}
           </span>
         </div>
 
         <input
           type="range"
           min={0}
-          max={GRADE_STEPS.length - 1}
+          max={PASOS_NOTA.length - 1}
           step={1}
-          value={sliderIndex < 0 ? Math.round((aiScore - 1) / 0.5) : sliderIndex}
-          onChange={e => onScoreChange(GRADE_STEPS[parseInt(e.target.value)])}
+          value={sliderIndex < 0 ? PASOS_NOTA.indexOf(4.0) : sliderIndex}
+          onChange={e => onScoreChange(PASOS_NOTA[parseInt(e.target.value)])}
           className="w-full h-2 rounded-lg appearance-none bg-slate-200 cursor-pointer"
         />
 

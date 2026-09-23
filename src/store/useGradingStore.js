@@ -107,19 +107,27 @@ export const useGradingStore = create((set, get) => ({
       evalError: null,
       adjustments: ajustes,
       globalScore: evaluation.globalScore ?? null,
+      globalScoreManual: false,
       globalObservation: '',
       globalJustificationEdit: null,
     });
   },
 
   globalScore: null,           // professor's final global grade
+  // Si el docente fija la nota final a mano, deja de seguir a los criterios:
+  // recalcularla por debajo le borraría la decisión sin avisar.
+  globalScoreManual: false,
   globalObservation: '',
   // La justificación global viene redactada para la nota propuesta. Si el
   // docente ajusta las notas, deja de corresponder y hay que poder corregirla:
   // sin esto el PDF puede afirmar que la entrega reprueba mientras imprime una
   // nota aprobatoria.
   globalJustificationEdit: null,
-  setGlobalScore: s => set({ globalScore: s }),
+  // manual = el docente movió la nota final él mismo; automático = viene del
+  // promedio ponderado de los criterios.
+  setGlobalScore: (s, manual = true) => set({ globalScore: s, globalScoreManual: manual }),
+  /** Devuelve la nota final al promedio de los criterios. */
+  volverAlPonderado: s => set({ globalScore: s, globalScoreManual: false }),
   setGlobalObservation: o => set({ globalObservation: o }),
   setGlobalJustification: j => set({ globalJustificationEdit: j }),
 
@@ -136,6 +144,7 @@ export const useGradingStore = create((set, get) => ({
       evalError: null,
       adjustments: {},
       globalScore: null,
+      globalScoreManual: false,
       globalObservation: '',
       globalJustificationEdit: null,
     });

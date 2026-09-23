@@ -3,8 +3,7 @@ import { useGradingStore } from '../store/useGradingStore.js';
 import { DELIVERIES, GRADE_COLORS } from '../lib/rubric.js';
 import CriterionCard from './CriterionCard.jsx';
 import { generateFeedbackPDF } from '../lib/pdfExport.js';
-
-const GRADE_STEPS = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0, 5.5, 6.0, 6.5, 7.0];
+import { PASOS_NOTA, ponderar, desglose, formatoNota } from '../lib/notas.js';
 
 const ESTADO_STYLES = {
   'Cumple': 'bg-green-100 text-green-700',
@@ -17,7 +16,7 @@ export default function Step5_Results() {
   const {
     delivery, studentName, evaluation, admissibility,
     adjustments, setAdjustment,
-    globalScore, setGlobalScore,
+    globalScore, setGlobalScore, globalScoreManual, volverAlPonderado,
     globalObservation, setGlobalObservation,
     globalJustificationEdit, setGlobalJustification,
     reset,
@@ -44,24 +43,33 @@ export default function Step5_Results() {
   });
 
   const aiGlobal = evaluation.globalScore ?? 1.0;
-  const finalGlobal = globalScore ?? aiGlobal;
-  const justificacion = globalJustificationEdit ?? evaluation.globalJustification ?? '';
-  const notasAjustadas = Math.abs(finalGlobal - aiGlobal) > 0.01;
-  const globalIdx = GRADE_STEPS.indexOf(finalGlobal);
 
-  // Recalculate weighted global score when a criterion score changes
+  // El promedio ponderado de las notas que están puestas ahora mismo. Es la
+  // nota final salvo que el docente la haya fijado a mano.
+  const detalle = desglose(criteria.map(c => ({
+    label: c.label, weight: c.weight, score: c.professorScore,
+  })));
+  const ponderado = detalle.nota ?? aiGlobal;
+
+  const finalGlobal = globalScoreManual ? (globalScore ?? ponderado) : ponderado;
+  const justificacion = globalJustificationEdit ?? evaluation.globalJustification ?? '';
+  const notasAjustadas = Math.abs(finalGlobal - aiGlobal) > 0.049;
+  const difiereDelPonderado = Math.abs(finalGlobal - ponderado) > 0.049;
+  const globalIdx = PASOS_NOTA.indexOf(finalGlobal);
+
+  // Al cambiar la nota de un criterio, la final sigue al promedio ponderado —
+  // salvo que ya se haya fijado a mano, porque entonces recalcularla por debajo
+  // borraría esa decisión sin avisar.
   function handleScoreChange(id, score) {
     setAdjustment(id, 'score', score);
-    const updated = rubricCriteria.map(rc => {
+
+    const recalculada = ponderar(rubricCriteria.map(rc => {
       const adj = useGradingStore.getState().adjustments[rc.id] ?? {};
       const aiCrit = evaluation.criteria?.find(c => c.id === rc.id) ?? {};
-      const s = rc.id === id ? score : (adj.score ?? aiCrit.score ?? 1.0);
-      return { weight: rc.weight, s };
-    });
-    const totalWeight = updated.reduce((sum, c) => sum + c.weight, 0);
-    const weighted = updated.reduce((sum, c) => sum + c.s * c.weight, 0) / (totalWeight || 1);
-    const snapped = Math.max(1.0, Math.min(7.0, Math.round(weighted * 2) / 2));
-    setGlobalScore(snapped);
+      return { weight: rc.weight, score: rc.id === id ? score : (adj.score ?? aiCrit.score ?? 1.0) };
+    }));
+
+    if (!globalScoreManual && recalculada !== null) volverAlPonderado(recalculada);
   }
 
   function handleExport() {
@@ -226,26 +234,64 @@ export default function Step5_Results() {
           <div>
             <div className="text-sm font-medium text-blue-200">Nota final del docente</div>
             <div className="text-xs text-blue-300 mt-0.5">
-              Ajusta si lo consideras necesario
+              {globalScoreManual
+                ? 'Fijada a mano — ya no sigue a los criterios'
+                : 'Se recalcula al cambiar la nota de cualquier criterio'}
             </div>
           </div>
           <div className={`text-4xl font-bold ${finalGlobal >= 4 ? 'text-green-300' : 'text-red-300'}`}>
-            {finalGlobal.toFixed(1).replace('.', ',')}
+            {formatoNota(finalGlobal)}
           </div>
         </div>
+
+        {/* De dónde sale la nota. Es la aritmética que el estudiante puede
+            reclamar, así que se muestra en vez de pedir que se confíe. */}
+        {detalle.partes.length > 0 && (
+          <div className="mb-4 text-xs bg-blue-900/40 rounded-lg px-3 py-2 space-y-1">
+            {detalle.partes.map(p => (
+              <div key={p.label} className="flex justify-between text-blue-100">
+                <span className="truncate pr-2">
+                  {p.label} · {Math.round(p.weight * 100)}%
+                </span>
+                <span className="font-mono shrink-0">
+                  {formatoNota(p.score)} × {Math.round(p.weight * 100)}% = {p.aporte.toFixed(2).replace('.', ',')}
+                </span>
+              </div>
+            ))}
+            <div className="flex justify-between border-t border-blue-700 pt-1 font-semibold text-white">
+              <span>Promedio ponderado</span>
+              <span className="font-mono">{formatoNota(ponderado)}</span>
+            </div>
+          </div>
+        )}
 
         <input
           type="range"
           min={0}
-          max={GRADE_STEPS.length - 1}
+          max={PASOS_NOTA.length - 1}
           step={1}
-          value={globalIdx < 0 ? Math.round((aiGlobal - 1) / 0.5) : globalIdx}
-          onChange={e => setGlobalScore(GRADE_STEPS[parseInt(e.target.value)])}
+          value={globalIdx < 0 ? PASOS_NOTA.indexOf(4.0) : globalIdx}
+          onChange={e => setGlobalScore(PASOS_NOTA[parseInt(e.target.value)])}
           className="w-full h-2 rounded-lg appearance-none bg-blue-700 cursor-pointer mb-1"
         />
         <div className="flex justify-between text-[10px] text-blue-300 px-0.5">
           {[1, 2, 3, 4, 5, 6, 7].map(n => <span key={n}>{n}</span>)}
         </div>
+
+        {difiereDelPonderado && (
+          <div className="mt-3 flex items-center justify-between gap-3 text-xs bg-amber-400/20 border border-amber-300/40 rounded-lg px-3 py-2">
+            <span className="text-amber-100">
+              La nota final ({formatoNota(finalGlobal)}) no coincide con el promedio de los
+              criterios ({formatoNota(ponderado)}).
+            </span>
+            <button
+              onClick={() => volverAlPonderado(ponderado)}
+              className="shrink-0 px-2.5 py-1 rounded-md font-semibold text-uvm-blue bg-white hover:bg-blue-50"
+            >
+              Volver a {formatoNota(ponderado)}
+            </button>
+          </div>
+        )}
 
         {finalGlobal < 4.0 && (
           <div className="mt-3 text-sm text-red-300 font-medium text-center">
