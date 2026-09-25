@@ -342,12 +342,22 @@ Excepciones válidas de la pauta que NO debes penalizar: material de proveedor
 exclusivo (basta una cotización), y material no distribuido en la región o en
 el país (vale respaldo por correo del proveedor).`;
 
-const INSTRUCCIONES_APU = `TAREA: revisar cartillas de ANÁLISIS DE PRECIOS UNITARIOS.
+const INSTRUCCIONES_APU = `TAREA: revisar el libro de MÉTODOS CONSTRUCTIVOS y ANÁLISIS DE PRECIOS UNITARIOS.
 
-Una hoja puede contener UNA cartilla o VARIAS, una tras otra; las dos formas son
-válidas según la pauta. Entrega una entrada por CARTILLA, no por hoja, con el
-número de ítem de la partida que analiza. Si una hoja trae seis cartillas,
-entrega seis entradas.
+La entrega es UN SOLO libro con ambas cosas: el método constructivo de cada
+partida y su cartilla APU. Una hoja puede contener UNA cartilla o VARIAS, una
+tras otra; las dos formas son válidas y ninguna es motivo de observación.
+Entrega una entrada por CARTILLA o por MÉTODO, no por hoja, con el número de
+ítem de la partida. Si una hoja trae seis cartillas, entrega seis entradas.
+
+0. Método constructivo (es el criterio de mayor peso, 30%). Un método bien
+   ejecutado describe el paso a paso real de la faena en orden de ejecución,
+   nombra la cuadrilla básica con sus especialidades, declara las herramientas,
+   maquinarias y equipos (HME) que usa, y deja explícitas las prelaciones: qué
+   debe estar terminado antes de empezar. Un método deficiente se queda en
+   generalidades ("se procede a hormigonar según norma"), copia el texto de las
+   EETT, omite la cuadrilla o los HME, o no dice de qué depende la partida.
+   Señala cuál de los dos es, citando lo que dice la hoja.
 
 Por cada cartilla de esta tanda:
 1. Mano de obra: Maestros y Ayudantes deben llevar especialidad (carpintero,

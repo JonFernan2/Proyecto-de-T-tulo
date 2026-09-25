@@ -713,16 +713,22 @@ Evaluación cruzada que debes hacer:
 - Materiales en cubicaciones sin cotización correspondiente (identifica cuáles)
 - Inconsistencias de unidades entre listado, cubicaciones y cotizaciones
 
-EXIGENCIA DE COBERTURA (pauta vigente):
+${delivery === 'E2' ? `EXIGENCIA DE COBERTURA (Entrega 2):
+Esta entrega NO se filtra por admisibilidad: se evalúan todas.
+Se espera que todas las partidas del itemizado tengan su cartilla APU (100%),
+sin que sea obligatorio alcanzarlo. Con menos del 80% el estudiante NO APRUEBA
+el ramo. El porcentaje real y las partidas sin cartilla vienen calculados en los
+hechos verificados: úsalos tal cual y nómbralas.
+Los pesos de cada criterio se mantienen sin alteración.` : `EXIGENCIA DE COBERTURA (pauta vigente):
 Cubicaciones y cotizaciones exigen un mínimo del 50% de las actividades del
 listado. El porcentaje real viene calculado en los hechos verificados:
 - Cobertura ≥ 50% → el criterio se evalúa normalmente por su calidad
 - Cobertura < 50% → el criterio no puede superar nota 3,5, e indícalo explícitamente
-Los pesos de cada criterio se mantienen sin alteración.
+Los pesos de cada criterio se mantienen sin alteración.`}
 
 La nota es HOLÍSTICA (no promedio matemático): los porcentajes son guía de importancia relativa.
 
-ESCALA: 1,0 a 7,0 en pasos de 0,5. Nota mínima de aprobación: 4,0.
+ESCALA: 1,0 a 7,0 en pasos de 0,1. Nota mínima de aprobación: 4,0.
 
 Cada justificación: 4-6 oraciones en voz impersonal, específica, con ejemplos
 concretos (nombres de partidas, celdas, valores numéricos, nombres de hojas),

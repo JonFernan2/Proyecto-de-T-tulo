@@ -89,11 +89,15 @@ export const DELIVERIES = {
           'Arriendo vs propiedad. Desgaste 0,02% para propios. Valor/rendimiento para arrendados.',
       },
     ],
+    // La entrega es UN SOLO Excel con los métodos constructivos y las cartillas
+    // APU juntos. Lo de la Entrega 1 puede volver a adjuntarse para el cruce,
+    // pero exigirlo dejaría al docente sin poder continuar teniendo la entrega
+    // completa delante.
     expectedFiles: [
-      { role: 'eett', label: 'EETT E1 (re-verificación)', formats: [], required: true, multiple: false },
-      { role: 'cubicaciones', label: 'Listado + Cubicaciones E1', formats: [], required: true, multiple: false },
-      { role: 'cotizaciones', label: 'Cotizaciones E1', formats: [], required: false, multiple: true },
-      { role: 'apu', label: 'APU — Cartillas (Anexo 01)', formats: [], required: true, multiple: false },
+      { role: 'apu', label: 'Excel de Métodos Constructivos + APU', formats: ['xlsx'], required: true, multiple: true },
+      { role: 'cubicaciones', label: 'Listado + Cubicaciones E1 (para el cruce)', formats: [], required: false, multiple: true },
+      { role: 'eett', label: 'EETT E1 (re-verificación)', formats: [], required: false, multiple: false },
+      { role: 'cotizaciones', label: 'Cotizaciones E1 (precios de referencia)', formats: [], required: false, multiple: true },
     ],
     admissibility: {
       eett: { required: true, threshold: 1.0, label: 'EETT (100% obligatorio)' },

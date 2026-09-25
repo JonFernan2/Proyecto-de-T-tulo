@@ -23,6 +23,9 @@ export function guessRole(file, delivery) {
   if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) return 'imagen';
   if (ext === 'xlsx' || ext === 'xls') {
     if (/apu|analisis|análisis|precios|unitarios|cartilla/.test(name)) return 'apu';
+    // La Entrega 2 es un solo libro con los métodos constructivos y las
+    // cartillas juntos, y puede llamarse solo "métodos constructivos".
+    if (delivery === 'E2' && /m[eé]todos?|constructivos?|anexo\s*0?1/.test(name)) return 'apu';
     // En E2 el itemizado y las cubicaciones de E1 se revisan como un solo
     // conjunto —la pauta los pide juntos— y no hay rol «listado» esperado: si
     // se separaran, la pantalla daría por faltantes las cubicaciones teniendo
