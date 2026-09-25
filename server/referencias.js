@@ -20,19 +20,34 @@ const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'referencias
 // la escritura de caché y diluye la atención del modelo.
 const AVISO_CHARS = 120_000;
 
-let cache = null;
+// Un caché por entrega: el prefijo debe ser constante dentro de una revisión,
+// pero no tiene por qué ser el mismo entre E1 y E2.
+const cache = new Map();
 
-export function cargarReferencias() {
-  if (cache) return cache;
+/**
+ * Un archivo que empieza por "E1-" o "E2-" pertenece solo a esa entrega. El
+ * resto rigen siempre. Sin esto, las reglas del APU viajarían en cada tanda de
+ * una revisión de Entrega 1, encareciéndola y dándole criterios que no aplican.
+ */
+function aplicaA(nombre, delivery) {
+  const m = /^(E\d)[-_]/i.exec(nombre);
+  return !m || !delivery || m[1].toUpperCase() === delivery.toUpperCase();
+}
+
+export function cargarReferencias(delivery = null) {
+  const clave = delivery ?? 'todas';
+  if (cache.has(clave)) return cache.get(clave);
 
   let archivos = [];
   try {
     archivos = fs.readdirSync(DIR)
       .filter(n => /\.(md|txt)$/i.test(n) && !n.startsWith('_'))
+      .filter(n => aplicaA(n, delivery))
       .sort();
   } catch {
-    cache = { texto: '', archivos: [] };
-    return cache;
+    const vacio = { texto: '', archivos: [] };
+    cache.set(clave, vacio);
+    return vacio;
   }
 
   const cargados = [];
@@ -66,8 +81,9 @@ export function cargarReferencias() {
       '═══════════════════════════════════════════════════════════\n';
   }
 
-  cache = { texto, archivos: cargados };
-  return cache;
+  const resultado = { texto, archivos: cargados };
+  cache.set(clave, resultado);
+  return resultado;
 }
 
 export function reportarReferencias() {
@@ -80,6 +96,8 @@ export function reportarReferencias() {
   console.log(`[referencias] ${archivos.length} documento(s) · ~${total.toLocaleString('es-CL')} tokens (cacheados):`);
   for (const a of archivos) {
     const aviso = a.chars > AVISO_CHARS ? '  ← conviene resumirlo' : '';
-    console.log(`  · ${a.nombre} (~${a.tokensAprox.toLocaleString('es-CL')} tokens)${aviso}`);
+    const soloPara = /^(E\d)[-_]/i.exec(a.nombre);
+    const alcance = soloPara ? `  · solo ${soloPara[1].toUpperCase()}` : '';
+    console.log(`  · ${a.nombre} (~${a.tokensAprox.toLocaleString('es-CL')} tokens)${alcance}${aviso}`);
   }
 }

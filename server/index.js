@@ -276,7 +276,7 @@ app.post('/api/deep-review/adoptar', async (req, res) => {
       model: MODEL,
       rubric: getRubric(delivery),
       listadoText,
-      referencias: cargarReferencias().texto,
+      referencias: cargarReferencias(delivery).texto,
       payload,
     });
 
@@ -465,7 +465,7 @@ app.post('/api/deep-review/start', async (req, res) => {
       model: MODEL,
       rubric: getRubric(delivery),
       listadoText,
-      referencias: cargarReferencias().texto,
+      referencias: cargarReferencias(delivery).texto,
       payload,
     });
 
@@ -623,7 +623,7 @@ function buildConsolidationContent(ctx, hallazgosTexto, totales) {
 
   let text = `## CORRECCIÓN ${delivery} — Estudiante: ${studentName}\n\n`;
   text += getRubric(delivery);
-  text += cargarReferencias().texto;
+  text += cargarReferencias(delivery).texto;
   text += '\n\n---\n\n';
   text += formatHechos(payload.admissibility, payload);
 
@@ -748,7 +748,7 @@ function buildUserContent(delivery, studentName, payload) {
 
   let text = `## CORRECCIÓN ${delivery} — Estudiante: ${studentName}\n\n`;
   text += getRubric(delivery);
-  text += cargarReferencias().texto;
+  text += cargarReferencias(delivery).texto;
   text += '\n\n---\n\n';
   text += formatHechos(admissibility, { cubicaciones, listado, cotizaciones, cotizacionesFiles, apu, pdfNames, respaldoPdfs });
   text += `IMPORTANTE: Cada bloque <seccion> corresponde a un DOCUMENTO DISTINTO del estudiante.
