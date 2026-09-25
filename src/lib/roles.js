@@ -23,6 +23,11 @@ export function guessRole(file, delivery) {
   if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) return 'imagen';
   if (ext === 'xlsx' || ext === 'xls') {
     if (/apu|analisis|análisis|precios|unitarios|cartilla/.test(name)) return 'apu';
+    // En E2 el itemizado y las cubicaciones de E1 se revisan como un solo
+    // conjunto —la pauta los pide juntos— y no hay rol «listado» esperado: si
+    // se separaran, la pantalla daría por faltantes las cubicaciones teniendo
+    // el archivo cargado delante.
+    if (delivery === 'E2' && /itemizado|listado|partidas|cubica/.test(name)) return 'cubicaciones';
     // "cubica" gana sobre "itemizado": un libro llamado "LISTADO Y CUBICACIONES"
     // trae ambas cosas y debe revisarse como cubicaciones.
     if (/cubica/.test(name)) return 'cubicaciones';

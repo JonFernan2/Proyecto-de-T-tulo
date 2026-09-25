@@ -1,8 +1,11 @@
-import { countListadoItems, medirCotizaciones } from './excelMetrics.js';
+import { countListadoItems, medirCotizaciones, extraerItemsListado, medirApu } from './excelMetrics.js';
 
 // Umbral mínimo exigido para cubicaciones y cotizaciones (pauta: 50%).
 export const UMBRAL_CUBICACIONES = 0.5;
 export const UMBRAL_COTIZACIONES = 0.5;
+// El APU sí se exige completo: la pauta pide una cartilla por cada partida del
+// itemizado.
+export const UMBRAL_APU = 1.0;
 
 /**
  * Run admissibility checks for E1 or E2.
@@ -29,22 +32,7 @@ export function runAdmissibility(delivery, filesMap) {
   results.push(checkCotizaciones(filesMap));
 
   // ── APU (solo E2) ───────────────────────────────────────────────────────────
-  if (delivery === 'E2') {
-    const apuPresent = hasExcelContent(filesMap.apu);
-    const nApu = filesMap.apu?.sheets?.length ?? 0;
-    const apuRatio = nItems > 0 ? Math.min(nApu, nItems) / nItems : undefined;
-    results.push({
-      id: 'apu',
-      label: 'APU Cartillas (obligatorio)',
-      passed: apuPresent,
-      detail: apuPresent
-        ? (nItems > 0
-            ? `${nApu} cartilla(s) APU · ${nItems} actividad(es) en el listado (${pct(apuRatio)} con APU).`
-            : `Presente. ${nApu} cartilla(s).`)
-        : 'No se encontró archivo APU.',
-      ...(apuRatio !== undefined ? { ratio: apuRatio, threshold: UMBRAL_CUBICACIONES } : {}),
-    });
-  }
+  if (delivery === 'E2') results.push(checkApu(filesMap, delivery));
 
   const passed = results.every(r => r.passed);
   return { passed, results, resumen: buildResumen(results, nItems) };
@@ -200,6 +188,54 @@ function checkCotizaciones(filesMap) {
 }
 
 // ─── Cuadro resumen ───────────────────────────────────────────────────────────
+/**
+ * APU (E2). Lo que decide la cobertura es cuántas partidas del itemizado tienen
+ * su cartilla, no cuántas hojas trae el libro: las cartillas pueden ir una por
+ * hoja o todas dentro de la misma, y ambas formas son válidas.
+ */
+function checkApu(filesMap) {
+  const base = { id: 'apu', label: 'APU Cartillas (una por partida del itemizado)' };
+
+  if (!hasExcelContent(filesMap.apu)) {
+    return { ...base, passed: false, detail: 'No se encontró archivo APU.' };
+  }
+
+  const items = extraerItemsListado(filesMap.listado ?? filesMap.cubicaciones);
+  const m = medirApu(filesMap.apu, items);
+
+  const comoViene = {
+    'una-hoja-por-cartilla': 'una hoja por cartilla',
+    'cartillas-dentro-de-la-hoja': 'varias cartillas por hoja',
+    'hojas-con-contenido': 'no se reconocieron las secciones (MO / materiales / equipos)',
+  }[m.metodo] ?? m.metodo;
+
+  let detail = `${m.apus} cartilla(s) APU detectada(s) · ${comoViene}.`;
+
+  if (!items.length) {
+    detail += ' No se pudo leer el itemizado, así que no hay con qué cruzarlas.';
+    return { ...base, passed: true, detail };
+  }
+
+  detail += ` El itemizado trae ${items.length} partida(s): ${m.itemsConApu.length} con APU (${pct(m.ratio)}).`;
+
+  if (m.cruceFiable && m.itemsSinApu.length) {
+    const muestra = m.itemsSinApu.slice(0, 12).join(', ');
+    detail += ` Sin APU: ${muestra}${m.itemsSinApu.length > 12 ? ` y ${m.itemsSinApu.length - 12} más` : ''}.`;
+  } else if (!m.cruceFiable) {
+    detail += ' No se identificaron números de partida dentro de las cartillas,'
+            + ' así que la comparación es por cantidad y no por cuáles.';
+  }
+
+  return {
+    ...base,
+    passed: true,                       // el archivo está; la cobertura es nota, no admisibilidad
+    detail,
+    ratio: m.ratio,
+    threshold: UMBRAL_APU,
+    cumpleUmbral: m.ratio >= UMBRAL_APU,
+  };
+}
+
 function buildResumen(results, nItems) {
   return {
     nActividades: nItems,
@@ -218,6 +254,10 @@ function pct(r) {
   return r === undefined ? '—' : `${Math.round(r * 100)}%`;
 }
 
+// Se mira el contenido real además del contador: totalRows se arrastra de la
+// lectura y al fusionar varios libros puede quedar en cero, y entonces un
+// archivo con datos delante se daba por no entregado.
 function hasExcelContent(data) {
-  return Boolean(data?.sheets?.length > 0 && data.totalRows > 0);
+  if (!data?.sheets?.length) return false;
+  return data.totalRows > 0 || data.sheets.some(s => (s.rows ?? []).some(r => r?.length));
 }

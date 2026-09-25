@@ -80,8 +80,14 @@ export function buildDeepReviewRequests({ delivery, studentName, model, rubric, 
   const requests = [];
   const plan = [];
 
-  const push = (kind, sheets, chunkSize, instrucciones) => {
-    if (!sheets?.length) return;
+  const push = (kind, hojasCrudas, chunkSize, instrucciones) => {
+    if (!hojasCrudas?.length) return;
+
+    // Una hoja larga se parte en ventanas de filas. Sin esto se recortaba a las
+    // primeras 200 y el resto se perdía en silencio: un estudiante con sus
+    // cartillas APU —o sus cubicaciones— todas dentro de una misma hoja habría
+    // tenido revisadas las primeras ocho y nada más.
+    const sheets = partirHojasLargas(hojasCrudas);
 
     // Las hojas con respaldo incrustado pesan mucho más: cada captura de AutoCAD
     // ocupa lo que cientos de filas de texto. Se reduce la tanda para que el
@@ -338,6 +344,11 @@ el país (vale respaldo por correo del proveedor).`;
 
 const INSTRUCCIONES_APU = `TAREA: revisar cartillas de ANÁLISIS DE PRECIOS UNITARIOS.
 
+Una hoja puede contener UNA cartilla o VARIAS, una tras otra; las dos formas son
+válidas según la pauta. Entrega una entrada por CARTILLA, no por hoja, con el
+número de ítem de la partida que analiza. Si una hoja trae seis cartillas,
+entrega seis entradas.
+
 Por cada cartilla de esta tanda:
 1. Mano de obra: Maestros y Ayudantes deben llevar especialidad (carpintero,
    concretero, enfierrador, gasfíter, pintor). El costo día debe ser el sueldo
@@ -364,11 +375,49 @@ Por cada cartilla de esta tanda:
  * las traen, sus imágenes de respaldo intercaladas donde corresponde, para que
  * cada captura quede junto a las filas de su propia hoja.
  */
+// Cuánto se solapan dos ventanas consecutivas. Una cartilla APU parte a caballo
+// del corte si no se solapan, y quedaría ilegible en ambas.
+const SOLAPE_FILAS = 15;
+
+/**
+ * Parte las hojas que exceden el máximo de filas en varias «hojas» de una misma
+ * hoja real, para que ninguna fila quede fuera de la revisión.
+ *
+ * El nombre conserva el de origen y añade el rango, para que el hallazgo se
+ * pueda citar («APU, filas 201-400»).
+ */
+export function partirHojasLargas(sheets, maxFilas = MAX_ROWS_PER_SHEET) {
+  const salida = [];
+
+  for (const hoja of sheets) {
+    const filas = hoja.rows ?? [];
+    if (filas.length <= maxFilas) { salida.push(hoja); continue; }
+
+    const paso = Math.max(1, maxFilas - SOLAPE_FILAS);
+    for (let inicio = 0; inicio < filas.length; inicio += paso) {
+      const fin = Math.min(inicio + maxFilas, filas.length);
+      salida.push({
+        ...hoja,
+        name: `${hoja.name} (filas ${inicio + 1}-${fin})`,
+        rows: filas.slice(inicio, fin),
+        // Las imágenes no dicen a qué fila pertenecen, así que viajan con la
+        // primera ventana en vez de repetirse en todas y agotar el presupuesto.
+        images: inicio === 0 ? hoja.images : undefined,
+      });
+      if (fin >= filas.length) break;
+    }
+  }
+
+  return salida;
+}
+
 function formatSheetsChunk(sheets, kind, n, total) {
   const etiqueta = { cub: 'CUBICACIONES', cot: 'COTIZACIONES', apu: 'APU' }[kind] ?? kind;
   const bloques = [];
   let texto = `TANDA ${n} de ${total} — ${sheets.length} hoja(s) de ${etiqueta}.\n`;
-  texto += `Revisa TODAS las hojas de esta tanda y entrega una entrada por cada una.\n\n`;
+  texto += kind === 'apu'
+      ? `Revisa TODAS las hojas de esta tanda. Una hoja puede traer varias cartillas: entrega una entrada por CARTILLA, no por hoja.\n\n`
+      : `Revisa TODAS las hojas de esta tanda y entrega una entrada por cada una.\n\n`;
 
   let imagenesUsadas = 0;
   let bytesUsados = 0;

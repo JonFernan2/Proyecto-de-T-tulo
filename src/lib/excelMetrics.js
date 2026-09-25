@@ -196,6 +196,135 @@ export function measureCotizacionesCoverage(excelData) {
   return { quoted, total, ratio };
 }
 
+const CODIGO_ITEM_RE = /^\d{1,3}(\.\d{1,3}){0,3}$/;
+
+/**
+ * Los números de partida del listado, en orden.
+ *
+ * Son la referencia del cruce: lo que se evalúa no es cuántas cartillas hay,
+ * sino cuáles de las partidas del itemizado tienen su APU.
+ */
+export function extraerItemsListado(excelData) {
+  if (!excelData?.sheets?.length) return [];
+
+  const UNIT_RE = /\b(m2|m²|ml|m3|m³|kg|un\.?|und\.?|unid\.?|gl\.?|glb\.?|pm|hr|h|lts?|ton|jgo|pza|pzas|vj|set|m\b)/i;
+  const HEADER_RE = /^(item|ítem|n[°º]|nro|partida|descripci[oó]n|unidad|cantidad|total)/i;
+
+  const hojaListado = excelData.sheets.find(s =>
+    /listado|itemizado|actividades?|partidas?/i.test(s.name),
+  );
+  const hojas = hojaListado ? [hojaListado] : excelData.sheets;
+
+  const codigos = [];
+  const vistos = new Set();
+  for (const hoja of hojas) {
+    for (const row of hoja.rows ?? []) {
+      const primera = String(row?.[0]?.value ?? '').trim();
+      if (!primera || HEADER_RE.test(primera) || !CODIGO_ITEM_RE.test(primera)) continue;
+
+      const texto = row.map(c => String(c?.value ?? '')).join(' ');
+      if (!UNIT_RE.test(texto)) continue;
+      if (vistos.has(primera)) continue;
+
+      vistos.add(primera);
+      codigos.push(primera);
+    }
+  }
+  return codigos;
+}
+
+// Secciones que toda cartilla APU trae una vez. Sirven para contar cartillas
+// sin depender de cómo esté organizado el libro.
+const MARCAS_APU = [
+  /mano\s+de\s+obra/i,
+  /materiales/i,
+  /(equipos?|maquinarias?)/i,
+  /(an[áa]lisis\s+de\s+precio|a\.?\s*p\.?\s*u\.?\b|precio\s+unitario)/i,
+  /rendimiento/i,
+];
+
+/**
+ * Cuenta las cartillas APU y las cruza contra el itemizado.
+ *
+ * El libro puede venir de dos formas y ambas son válidas: una hoja por partida,
+ * o todas las cartillas dentro de una misma hoja. Contar hojas serviría solo
+ * para la primera —con la segunda daría «1 cartilla para 161 partidas»— así que
+ * se cuentan las cartillas por sus secciones, que aparecen una vez cada una.
+ *
+ * Lo que decide la cobertura es el cruce con el itemizado, no el total: veinte
+ * cartillas para veinte partidas distintas no es lo mismo que veinte para la
+ * misma partida.
+ */
+export function medirApu(apuData, itemsListado = []) {
+  const vacio = {
+    apus: 0, porHoja: [], metodo: 'sin-datos',
+    itemsConApu: [], itemsSinApu: [...itemsListado],
+    ratio: 0, cruceFiable: false,
+  };
+  if (!apuData?.sheets?.length) return vacio;
+
+  const porHoja = [];
+  const codigosEnApu = new Set();
+
+  for (const hoja of apuData.sheets) {
+    const filas = hoja.rows ?? [];
+    const conteos = MARCAS_APU.map(() => 0);
+
+    for (const row of filas) {
+      const texto = (row ?? []).map(c => String(c?.value ?? '')).join(' ');
+      if (!texto.trim()) continue;
+
+      MARCAS_APU.forEach((re, i) => { if (re.test(texto)) conteos[i]++; });
+
+      for (const celda of row ?? []) {
+        const v = String(celda?.value ?? '').trim();
+        if (CODIGO_ITEM_RE.test(v)) codigosEnApu.add(v);
+      }
+    }
+
+    // Cada sección aparece una vez por cartilla, pero no todas las cartillas
+    // traen todas: el máximo es la mejor estimación del número de bloques.
+    const bloques = Math.max(...conteos);
+    if (bloques > 0) porHoja.push({ hoja: hoja.name, apus: bloques });
+  }
+
+  const apus = porHoja.reduce((s, h) => s + h.apus, 0);
+
+  // Sin marcas reconocibles no se inventa un cero: se cuenta cada hoja con
+  // contenido como una cartilla y se deja dicho que la medición es débil.
+  if (!apus) {
+    const conContenido = apuData.sheets.filter(s => (s.rows ?? []).some(r => r?.length)).length;
+    return {
+      ...vacio,
+      apus: conContenido,
+      metodo: 'hojas-con-contenido',
+      ratio: itemsListado.length ? Math.min(conContenido / itemsListado.length, 1) : 0,
+    };
+  }
+
+  const itemsConApu = itemsListado.filter(c => codigosEnApu.has(c));
+  const itemsSinApu = itemsListado.filter(c => !codigosEnApu.has(c));
+
+  // El cruce solo vale si de verdad se encontraron números de partida dentro de
+  // las cartillas; si no, se cae al recuento de cartillas.
+  const cruceFiable = itemsListado.length > 0 && itemsConApu.length > 0;
+  const ratio = itemsListado.length === 0
+    ? 0
+    : Math.min((cruceFiable ? itemsConApu.length : apus) / itemsListado.length, 1);
+
+  return {
+    apus,
+    porHoja,
+    metodo: porHoja.length > 1 && porHoja.every(h => h.apus === 1)
+      ? 'una-hoja-por-cartilla'
+      : 'cartillas-dentro-de-la-hoja',
+    itemsConApu,
+    itemsSinApu,
+    ratio,
+    cruceFiable,
+  };
+}
+
 /**
  * Estimate APU completeness: each sheet should have method + MO + materials.
  * Returns fraction of sheets deemed "complete".
