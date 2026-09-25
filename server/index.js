@@ -1052,10 +1052,21 @@ especificar proveedor, espesor, formato y tipo concretos).
 
   return `## RÚBRICA ENTREGA 2 — Guía de Desarrollo Proyecto de Título (UVM)
 
-EXIGENCIA MÍNIMA DE COBERTURA: 50% de las actividades del listado deben contar
-con su cartilla APU. Los pesos de cada criterio NO cambian.
-Se registra todo en la Cartilla Excel del Anexo 01, UNA HOJA POR PARTIDA,
-siguiendo el orden del Listado de Actividades de la Entrega 1.
+EN ESTA ENTREGA NO SE FILTRA POR ADMISIBILIDAD: todas las entregas se evalúan.
+
+COBERTURA DEL APU — se espera que TODAS las partidas del itemizado tengan su
+cartilla (100%), aunque no es obligatorio alcanzarlo. Lo que sí es terminante:
+con menos del 80% de las partidas con APU el estudiante NO APRUEBA el ramo, y
+la nota final queda topada en 3,5 por bien resueltas que estén las cartillas
+entregadas. El porcentaje ya viene calculado en los hechos verificados, con las
+partidas que quedaron sin APU nombradas una por una: úsalo tal cual y cítalas.
+
+Se registra en la Cartilla Excel del Anexo 01, siguiendo el orden del Listado de
+Actividades de la Entrega 1. El estudiante puede poner UNA CARTILLA POR HOJA o
+TODAS LAS CARTILLAS EN UNA MISMA HOJA: ambas formas son válidas y ninguna es
+motivo de observación. Lo que se evalúa es qué partidas tienen cartilla y cómo
+están hechas, no cómo se repartió el libro. Los pesos de cada criterio NO
+cambian.
 
 ### 1. Métodos Constructivos (peso 30%, id: "metodos")
 - Un método por cada actividad del listado de la Entrega 1

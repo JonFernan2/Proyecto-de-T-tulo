@@ -51,7 +51,12 @@ export default function Step5_Results() {
   })));
   const ponderado = detalle.nota ?? aiGlobal;
 
-  const finalGlobal = globalScoreManual ? (globalScore ?? ponderado) : ponderado;
+  // Regla terminante de la Entrega 2: bajo el 80% de partidas con APU no se
+  // aprueba el ramo, por buenas que sean las notas de los criterios.
+  const tope = admissibility?.results?.find(r => r.notaMaxima !== undefined) ?? null;
+
+  const elegida = globalScoreManual ? (globalScore ?? ponderado) : ponderado;
+  const finalGlobal = tope ? Math.min(elegida, tope.notaMaxima) : elegida;
   const justificacion = globalJustificationEdit ?? evaluation.globalJustification ?? '';
   const notasAjustadas = Math.abs(finalGlobal - aiGlobal) > 0.049;
   const difiereDelPonderado = Math.abs(finalGlobal - ponderado) > 0.049;
@@ -278,7 +283,19 @@ export default function Step5_Results() {
           {[1, 2, 3, 4, 5, 6, 7].map(n => <span key={n}>{n}</span>)}
         </div>
 
-        {difiereDelPonderado && (
+        {tope && (
+          <div className="mt-3 text-sm bg-red-500/25 border border-red-300/50 rounded-lg px-3 py-2.5">
+            <div className="font-semibold text-red-100">
+              Nota topada en {formatoNota(tope.notaMaxima)} — no aprueba el ramo
+            </div>
+            <div className="text-xs text-red-100/90 mt-1 leading-relaxed">
+              {tope.detail} El promedio de los criterios da {formatoNota(elegida)}, pero la pauta
+              exige al menos el 80% de las partidas con APU para aprobar.
+            </div>
+          </div>
+        )}
+
+        {!tope && difiereDelPonderado && (
           <div className="mt-3 flex items-center justify-between gap-3 text-xs bg-amber-400/20 border border-amber-300/40 rounded-lg px-3 py-2">
             <span className="text-amber-100">
               La nota final ({formatoNota(finalGlobal)}) no coincide con el promedio de los

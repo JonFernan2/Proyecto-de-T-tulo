@@ -34,8 +34,9 @@ export default function Step3_Admissibility() {
     );
   }
 
-  const { passed, results } = admissibility;
+  const { passed, results, aplicaAdmisibilidad = true } = admissibility;
   const bajoUmbral = results.filter(r => r.cumpleUmbral === false);
+  const reprobatorio = results.find(r => r.reprueba);
 
   function exportRejectionPDF() {
     const { getFilesMap } = useGradingStore.getState();
@@ -98,24 +99,48 @@ export default function Step3_Admissibility() {
         </p>
       </div>
 
-      {/* Overall badge */}
-      <div className={`rounded-xl p-4 border-2 ${passed ? 'bg-green-50 border-green-400' : 'bg-red-50 border-red-400'}`}>
-        <div className="flex items-center gap-3">
-          <span className="text-3xl">{passed ? '✅' : '❌'}</span>
-          <div>
-            <div className={`text-lg font-bold ${passed ? 'text-green-700' : 'text-red-700'}`}>
-              {passed ? 'Entrega ADMISIBLE' : 'Entrega RECHAZADA'}
-            </div>
-            <div className="text-sm text-slate-600">
-              {!passed
-                ? 'Falta uno o más archivos obligatorios.'
-                : bajoUmbral.length > 0
-                  ? `Archivos completos, pero ${bajoUmbral.map(r => r.label.split(' (')[0]).join(' y ')} está bajo la exigencia del 50%.`
-                  : 'Todos los criterios cumplen la exigencia mínima del 50%.'}
+      {/* En la Entrega 2 no se filtra por admisibilidad: todas entran a
+          evaluación. Lo que sí decide aprobar o no es la cobertura del APU. */}
+      {!aplicaAdmisibilidad ? (
+        <div className={`rounded-xl p-4 border-2 ${reprobatorio ? 'bg-red-50 border-red-400' : 'bg-green-50 border-green-400'}`}>
+          <div className="flex items-start gap-3">
+            <span className="text-3xl">{reprobatorio ? '⚠️' : '✅'}</span>
+            <div>
+              <div className={`text-lg font-bold ${reprobatorio ? 'text-red-700' : 'text-green-700'}`}>
+                {reprobatorio ? 'Bajo el 80% de APU — no aprueba el ramo' : 'Entrega en evaluación'}
+              </div>
+              <div className="text-sm text-slate-600 mt-0.5">
+                En esta entrega no se filtra por admisibilidad: todas pasan a evaluación.
+                Lo que se verifica aquí es cuántas partidas del itemizado tienen su cartilla
+                APU — se espera el 100%, y bajo el 80% no se aprueba el ramo.
+              </div>
+              {reprobatorio && (
+                <div className="text-sm text-red-700 font-medium mt-2">
+                  {reprobatorio.detail}
+                </div>
+              )}
             </div>
           </div>
         </div>
-      </div>
+      ) : (
+        <div className={`rounded-xl p-4 border-2 ${passed ? 'bg-green-50 border-green-400' : 'bg-red-50 border-red-400'}`}>
+          <div className="flex items-center gap-3">
+            <span className="text-3xl">{passed ? '✅' : '❌'}</span>
+            <div>
+              <div className={`text-lg font-bold ${passed ? 'text-green-700' : 'text-red-700'}`}>
+                {passed ? 'Entrega ADMISIBLE' : 'Entrega RECHAZADA'}
+              </div>
+              <div className="text-sm text-slate-600">
+                {!passed
+                  ? 'Falta uno o más archivos obligatorios.'
+                  : bajoUmbral.length > 0
+                    ? `Archivos completos, pero ${bajoUmbral.map(r => r.label.split(' (')[0]).join(' y ')} está bajo la exigencia del 50%.`
+                    : 'Todos los criterios cumplen la exigencia mínima del 50%.'}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Per-criterion results */}
       <div className="space-y-3">
@@ -172,7 +197,7 @@ export default function Step3_Admissibility() {
           ← Modificar archivos
         </button>
 
-        {!passed && (
+        {!passed && aplicaAdmisibilidad && (
           <button
             onClick={exportRejectionPDF}
             className="px-4 py-2.5 rounded-lg font-semibold text-white bg-red-600 hover:bg-red-700 text-sm"
