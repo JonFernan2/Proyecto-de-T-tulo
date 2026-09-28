@@ -250,9 +250,20 @@ function checkApu(filesMap) {
     return { ...base, passed: true, detail };
   }
 
+  // Hay itemizado pero ninguna cartilla se pudo emparejar con él: o las hojas
+  // no dicen a qué partida corresponden, o lo que se leyó como itemizado no lo
+  // era. Sin cruce no hay cobertura que informar, y menos una nota que topar.
+  if (!m.cruceFiable) {
+    detail += ` Se leyeron ${items.length} partida(s) del itemizado, pero ninguna cartilla`
+            + ' pudo emparejarse con ellas: las hojas no indican a qué partida corresponden'
+            + ' —ni por su código ni por su nombre—. No se puede medir la cobertura;'
+            + ' revísala a mano o adjunta el itemizado de la Entrega 1.';
+    return { ...base, passed: true, detail };
+  }
+
   detail += ` El itemizado trae ${items.length} partida(s): ${m.itemsConApu.length} con APU (${pct(m.ratio)}).`;
 
-  if (m.cruceFiable && m.itemsSinApu.length) {
+  if (m.itemsSinApu.length) {
     // Las especialidades cuentan igual en la cobertura, pero se nombran aparte:
     // suelen ir por subcontrato y el docente decide si las penaliza.
     const obra = m.itemsSinApu.filter(p => !p.especialidad);
@@ -263,9 +274,6 @@ function checkApu(filesMap) {
       detail += ` Sin APU, de especialidades: ${listar(especialidades)}`
               + ` — cuentan en el porcentaje, pero suelen ir por subcontrato.`;
     }
-  } else if (!m.cruceFiable) {
-    detail += ' No se identificaron números de partida dentro de las cartillas,'
-            + ' así que la comparación es por cantidad y no por cuáles.';
   }
 
   // Bajo el 80% de las partidas con APU el estudiante no aprueba el ramo. Se

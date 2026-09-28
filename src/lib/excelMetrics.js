@@ -211,10 +211,35 @@ export function normalizar(texto) {
     .trim();
 }
 
-/** El código sin su punto final, para que «3.2.1.» y «3.2.1» sean el mismo. */
-function codigoCanonico(v) {
-  return String(v ?? '').trim().replace(/\.$/, '');
+/**
+ * Lleva un código de partida a una forma única, o devuelve null si no lo es.
+ *
+ * Cada estudiante los escribe a su manera, y una entrega real trae de todo:
+ * «3.2.1.» con punto final, «1,3,1» con comas, «A.1» con capítulo por letra,
+ * y «1/2.1.1» en el itemizado que en la hoja aparece como «1-2.1.1», porque
+ * Excel no admite la barra en el nombre de una hoja. Todas son la misma cosa.
+ */
+export function codigoCanonico(v) {
+  const s = String(v ?? '').trim().toUpperCase()
+    .replace(/^A\.?P\.?U\.?[\s._-]*\d*[\s._-]*/, '')   // «APU_01 », «A.P.U. 3»
+    .replace(/[,/\\|_\s-]+/g, '.')
+    .replace(/\.{2,}/g, '.')
+    .replace(/^\.|\.$/g, '');
+  if (!s) return null;
+
+  const partes = s.split('.');
+  // Un código es corto y tiene números: «1.2.1.1», «A.1». «LETRERO.DE.OBRA» no.
+  if (partes.length > 7) return null;
+  if (!partes.every(p => /^[A-Z]{0,2}\d{0,3}$/.test(p) && p)) return null;
+  if (!/\d/.test(s)) return null;
+  // «1.5.M3» o «28.M3» no son partidas: son una cantidad con su unidad pegada.
+  if (partes.some(p => UNIDADES_SUELTAS.has(p))) return null;
+  return s;
 }
+
+const UNIDADES_SUELTAS = new Set([
+  'M', 'M2', 'M3', 'ML', 'KG', 'UN', 'UD', 'GL', 'HR', 'HH', 'TON', 'LT', 'LTS', 'SG', 'PZA',
+]);
 
 /**
  * Los números de partida del listado, en orden.
@@ -305,12 +330,14 @@ function buscarItems(hojas, exigirUnidad) {
       // blanco a la izquierda, o con un correlativo antes del ítem.
       const candidatos = row.slice(0, 4)
         .map(c => String(c?.value ?? '').trim())
-        .filter(v => v && !CABECERA_RE.test(v) && CODIGO_ITEM_RE.test(v));
+        .filter(v => v && !CABECERA_RE.test(v))
+        .map(codigoCanonico)
+        .filter(Boolean);
 
-      // Ante un correlativo (1, 2, 3…) y un ítem (1.1, 1.2…) en la misma fila,
-      // el ítem es el que lleva punto: quedarse con el primero devolvía la
-      // numeración de filas en vez de las partidas.
-      const codigo = codigoCanonico(candidatos.find(v => v.includes('.')) ?? candidatos[0] ?? '');
+      // Ante un correlativo (1, 2, 3…) y un ítem (1.1, A.1, 1/2.1.1) en la
+      // misma fila, el ítem es el que tiene más de un nivel: quedarse con el
+      // primero devolvía la numeración de filas en vez de las partidas.
+      const codigo = candidatos.find(v => v.includes('.')) ?? candidatos[0] ?? null;
       if (!codigo || vistos.has(codigo)) continue;
 
       const texto = row.map(c => String(c?.value ?? '')).join(' ');
@@ -337,18 +364,51 @@ function buscarItems(hojas, exigirUnidad) {
 // pueden tomarse como prueba de que exista la cartilla.
 const ES_HOJA_DE_LISTADO = /listado|itemizado|actividades?|partidas?|presupuesto|resumen|car[aá]tula|portada|[ií]ndice/i;
 
+// Ruido que aparece en las designaciones y no identifica a nadie.
+const PALABRAS_VACIAS = new Set([
+  'de', 'del', 'la', 'el', 'los', 'las', 'y', 'o', 'con', 'sin', 'para', 'por',
+  'en', 'ref', 'un', 'una', 'm', 'm2', 'm3', 'ml', 'kg', 'gl', 'hr', 'ton', 'ud',
+  'und', 'unid', 'cu', 'c', 'u', 'lt', 'lts', 'pza', 'mes', 'dia', 'dias', 'apu',
+]);
+
+/** Las palabras que de verdad nombran la partida, sin plural ni relleno. */
+function palabrasDePartida(texto) {
+  return [...new Set(
+    normalizar(texto).split(' ')
+      .filter(w => w.length >= 3 && !PALABRAS_VACIAS.has(w))
+      // «espejo» y «espejos» son la misma partida.
+      .map(w => (w.length >= 5 ? w.replace(/e?s$/, '') : w)),
+  )];
+}
+
 /**
  * ¿Alguna cartilla lleva el nombre de esta partida?
  *
- * Se compara normalizado y por contención en ambos sentidos, porque la hoja
- * abrevia («APU_01 LETRERO DE OBRA») lo que el itemizado escribe entero
- * («LETRERO DE OBRAS»). Se exige un mínimo de ocho caracteres para que nombres
- * cortos no emparejen con cualquier cosa.
+ * Se comparan PALABRAS COMPLETAS, no trozos de texto. Comparar por contención
+ * de cadenas obligaba a descartar los nombres cortos —«RADIER», «VIDRIOS»,
+ * «TINA»— para que no emparejaran con cualquier cosa, y con ellos se perdían
+ * cartillas que sí existían. Por palabras, «tina» ya no coincide con «cortina».
  */
 function coincidePorNombre(designacion, nombresEnApu) {
-  const objetivo = normalizar(designacion).replace(/\bref\b/g, '').trim();
-  if (objetivo.length < 8) return false;
-  return nombresEnApu.some(n => n.includes(objetivo) || objetivo.includes(n));
+  const partida = palabrasDePartida(designacion);
+  if (!partida.length) return false;
+
+  return nombresEnApu.some(cartilla => {
+    if (!cartilla.length) return false;
+    // Una contiene a la otra: la hoja abrevia lo que el itemizado escribe
+    // entero, o al revés.
+    const cabeEnPartida = cartilla.every(w => partida.includes(w));
+    const cabeEnCartilla = partida.every(w => cartilla.includes(w));
+    if (!cabeEnPartida && !cabeEnCartilla) return false;
+
+    // Si dicen exactamente lo mismo, son la misma partida por corto que sea el
+    // nombre: la hoja «TINA» analiza la partida «TINA».
+    if (cabeEnPartida && cabeEnCartilla) return true;
+
+    // Si una solo contiene a la otra, hace falta algo más que una palabra corta
+    // en común para no emparejar por casualidad.
+    return cartilla.filter(w => partida.includes(w)).join('').length >= 5;
+  });
 }
 
 /** Una hoja que trae al menos dos secciones de cartilla APU. */
@@ -403,10 +463,15 @@ export function medirApu(apuData, itemsListado = []) {
   for (const hoja of apuData.sheets) {
     const filas = hoja.rows ?? [];
     const conteos = MARCAS_APU.map(() => 0);
+    // La mayoría de los libros nombran cada hoja con el código de su partida
+    // («1.1.1.1», «A.1», «1,3,1», «1-2.1.1»). Es la pista más fiable que hay.
     const codigosDeLaHoja = new Set();
-    // El nombre de la hoja identifica la cartilla en los libros que las numeran
-    // correlativamente («APU_01 LETRERO DE OBRA») en vez de por código.
-    const nombresDeLaHoja = [normalizar(hoja.name.replace(/^apu[\s_-]*\d*/i, ''))];
+    const codigoDelNombre = codigoCanonico(hoja.name);
+    if (codigoDelNombre) codigosDeLaHoja.add(codigoDelNombre);
+
+    // Y los que no, ponen el nombre de la partida en la hoja y en su título
+    // («APU_01 LETRERO DE OBRA»).
+    const nombresDeLaHoja = [normalizar(hoja.name.replace(/^apu[\s._-]*\d*/i, ''))];
 
     for (const row of filas) {
       const celdas = (row ?? []).map(c => String(c?.value ?? '').trim());
@@ -415,16 +480,17 @@ export function medirApu(apuData, itemsListado = []) {
 
       MARCAS_APU.forEach((re, i) => { if (re.test(texto)) conteos[i]++; });
 
-      for (const v of celdas) {
-        if (CODIGO_ITEM_RE.test(v)) codigosDeLaHoja.add(codigoCanonico(v));
-      }
+      // Solo se lee el código junto a su rótulo. Rastrearlo por todas las
+      // celdas recogía cantidades —«1.00», «472.78» tienen forma de código— y
+      // daba por analizadas partidas que nadie había desarrollado.
+      const iRotulo = celdas.findIndex(v =>
+        /^(partida|[ií]tem)\b/i.test(v) || /partida\s*[-–]\s*actividad/i.test(v));
+      if (iRotulo < 0) continue;
 
-      // «PARTIDA - ACTIVIDAD | LETRERO DE OBRAS»: el rótulo y, a su derecha, el
-      // nombre de la partida que la cartilla analiza.
-      const iRotulo = celdas.findIndex(v => /^partida\b|partida\s*[-–]\s*actividad/i.test(v));
-      if (iRotulo >= 0) {
-        const nombre = celdas.slice(iRotulo + 1).find(v => v.length > 3 && /[a-záéíóúñ]{3}/i.test(v));
-        if (nombre) nombresDeLaHoja.push(normalizar(nombre));
+      for (const v of celdas.slice(iRotulo + 1, iRotulo + 4)) {
+        const c = codigoCanonico(v);
+        if (c) codigosDeLaHoja.add(c);
+        else if (v.length > 3 && /[a-záéíóúñ]{3}/i.test(v)) nombresDeLaHoja.push(normalizar(v));
       }
     }
 
@@ -451,7 +517,10 @@ export function medirApu(apuData, itemsListado = []) {
     // códigos daría por analizada toda partida listada: cobertura del 100% para
     // quien hizo la mitad.
     for (const c of codigosDeLaHoja) codigosEnApu.add(c);
-    for (const n of nombresDeLaHoja) if (n.length >= 8) nombresEnApu.push(n);
+    for (const n of nombresDeLaHoja) {
+      const pal = palabrasDePartida(n);
+      if (pal.length) nombresEnApu.push(pal);
+    }
   }
 
   const apus = porHoja.reduce((s, h) => s + h.apus, 0);
@@ -477,12 +546,11 @@ export function medirApu(apuData, itemsListado = []) {
   const itemsConApu = partidas.filter(tieneCartilla);
   const itemsSinApu = partidas.filter(p => !tieneCartilla(p));
 
-  // El cruce solo vale si de verdad se reconoció alguna cartilla; si no, se cae
-  // al recuento de cartillas.
+  // Si hay partidas pero ninguna cruzó, la cobertura NO se puede medir. Caer al
+  // recuento de cartillas daba un 100% con cero coincidencias, que es peor que
+  // no informar nada: da por aprobado lo que no se comprobó.
   const cruceFiable = partidas.length > 0 && itemsConApu.length > 0;
-  const ratio = partidas.length === 0
-    ? 0
-    : Math.min((cruceFiable ? itemsConApu.length : apus) / partidas.length, 1);
+  const ratio = cruceFiable ? Math.min(itemsConApu.length / partidas.length, 1) : 0;
 
   return {
     apus,
