@@ -177,12 +177,21 @@ export default function Step4_EvalLoading() {
               pendientes de revisión visual — no se contarán como cotizaciones faltantes.
             </div>
           ))}
-          {!plan.some(p => p.kind === 'cub') && (
-            <div className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-              No se detectaron hojas de cubicaciones. Revisa que el Excel correcto esté
-              asignado al rol «Listado + Cubicaciones» en el paso de archivos.
-            </div>
-          )}
+          {/* Cada entrega echa en falta lo suyo: en la Entrega 2 no se piden
+              cubicaciones, y avisar de su ausencia confundía más que ayudaba. */}
+          {delivery === 'E2'
+            ? !plan.some(p => p.kind === 'apu') && (
+                <div className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  No se detectaron cartillas APU. Revisa que el Excel del Anexo 01 esté
+                  asignado al rol «APU» en el paso de archivos.
+                </div>
+              )
+            : !plan.some(p => p.kind === 'cub') && (
+                <div className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  No se detectaron hojas de cubicaciones. Revisa que el Excel correcto esté
+                  asignado al rol «Listado + Cubicaciones» en el paso de archivos.
+                </div>
+              )}
         </div>
       )}
 
