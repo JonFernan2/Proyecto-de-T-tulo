@@ -207,30 +207,72 @@ const CODIGO_ITEM_RE = /^\d{1,3}(\.\d{1,3}){0,3}$/;
 export function extraerItemsListado(excelData) {
   if (!excelData?.sheets?.length) return [];
 
-  const UNIT_RE = /\b(m2|m²|ml|m3|m³|kg|un\.?|und\.?|unid\.?|gl\.?|glb\.?|pm|hr|h|lts?|ton|jgo|pza|pzas|vj|set|m\b)/i;
-  const HEADER_RE = /^(item|ítem|n[°º]|nro|partida|descripci[oó]n|unidad|cantidad|total)/i;
-
-  const hojaListado = excelData.sheets.find(s =>
+  // Se prefiere una hoja que se llame listado/itemizado. Si ninguna lo dice
+  // —el itemizado suele ser la primera hoja del libro, con cualquier nombre— se
+  // miran todas MENOS las que son cartillas: tomar el ítem de cada cartilla
+  // daría tantas partidas como cartillas, y por tanto un 100% siempre.
+  const porNombre = excelData.sheets.filter(s =>
     /listado|itemizado|actividades?|partidas?/i.test(s.name),
   );
-  const hojas = hojaListado ? [hojaListado] : excelData.sheets;
+  const hojas = porNombre.length ? porNombre : excelData.sheets.filter(s => !pareceCartillaApu(s));
 
+  // Dos pasadas: primero exigiendo unidad de medida, que es lo propio de un
+  // itemizado; si así no sale nada, basta con que la fila describa algo. Las
+  // unidades se escriben de mil maneras («UD», «C/U», «M.L.») y no reconocer
+  // una dejaba el itemizado entero en cero.
+  return buscarItems(hojas, true) || buscarItems(hojas, false) || [];
+}
+
+// El borde \b de JavaScript no considera letra a las vocales acentuadas, así
+// que \bm\b coincidía con la «m» de «máquina» y una fila sin unidad parecía
+// traerla. Se usa un borde propio que sí cuenta las tildes y la ñ.
+const NO_LETRA = '[^0-9a-záéíóúüñ]';
+const UNIDAD_RE = new RegExp(
+  `(?<=^|${NO_LETRA})(m2|m²|ml|m3|m³|kg|un|u/n|c/u|ud|und|unid|gl|glb|pm|hr|hh|h|lts?|ton|jgo|pza|pzas|vj|set|saco|sg|m)(?=$|${NO_LETRA})`,
+  'i',
+);
+const CABECERA_RE = /^(item|ítem|n[°º]|nro|partida|designaci[oó]n|descripci[oó]n|unidad|cantidad|total)/i;
+
+function buscarItems(hojas, exigirUnidad) {
   const codigos = [];
   const vistos = new Set();
+
   for (const hoja of hojas) {
     for (const row of hoja.rows ?? []) {
-      const primera = String(row?.[0]?.value ?? '').trim();
-      if (!primera || HEADER_RE.test(primera) || !CODIGO_ITEM_RE.test(primera)) continue;
+      if (!row?.length) continue;
+
+      // El código no siempre está en la columna A: hay libros con columnas en
+      // blanco a la izquierda, o con un correlativo antes del ítem.
+      const candidatos = row.slice(0, 4)
+        .map(c => String(c?.value ?? '').trim())
+        .filter(v => v && !CABECERA_RE.test(v) && CODIGO_ITEM_RE.test(v));
+
+      // Ante un correlativo (1, 2, 3…) y un ítem (1.1, 1.2…) en la misma fila,
+      // el ítem es el que lleva punto: quedarse con el primero devolvía la
+      // numeración de filas en vez de las partidas.
+      const codigo = candidatos.find(v => v.includes('.')) ?? candidatos[0] ?? null;
+      if (!codigo || vistos.has(codigo)) continue;
 
       const texto = row.map(c => String(c?.value ?? '')).join(' ');
-      if (!UNIT_RE.test(texto)) continue;
-      if (vistos.has(primera)) continue;
+      if (exigirUnidad && !UNIDAD_RE.test(texto)) continue;
+      // Una partida tiene designación: sin texto es una fila de números sueltos.
+      if (!/[a-záéíóúñ]{4}/i.test(texto)) continue;
 
-      vistos.add(primera);
-      codigos.push(primera);
+      vistos.add(codigo);
+      codigos.push(codigo);
     }
   }
-  return codigos;
+
+  return codigos.length ? codigos : null;
+}
+
+/** Una hoja que trae al menos dos secciones de cartilla APU. */
+function pareceCartillaApu(hoja) {
+  const texto = (hoja.rows ?? [])
+    .flat()
+    .map(c => String(c?.value ?? ''))
+    .join(' ');
+  return MARCAS_APU.filter(re => re.test(texto)).length >= 2;
 }
 
 // Secciones que toda cartilla APU trae una vez. Sirven para contar cartillas
@@ -283,9 +325,14 @@ export function medirApu(apuData, itemsListado = []) {
       }
     }
 
-    // Cada sección aparece una vez por cartilla, pero no todas las cartillas
-    // traen todas: el máximo es la mejor estimación del número de bloques.
-    const bloques = Math.max(...conteos);
+    // Cada sección debería aparecer una vez por cartilla, pero las hojas
+    // repiten esas palabras («COSTO MATERIALES», «TOTAL MANO DE OBRA»), así que
+    // el máximo se dispara: llegó a informar 805 cartillas donde había muchas
+    // menos. El mínimo de las secciones que sí aparecen es el recuento que no
+    // inventa cartillas — y como es una estimación de respaldo, conviene que
+    // peque de prudente.
+    const presentes = conteos.filter(n => n > 0);
+    const bloques = presentes.length ? Math.min(...presentes) : 0;
     if (bloques === 0) continue;
 
     porHoja.push({ hoja: hoja.name, apus: bloques });
