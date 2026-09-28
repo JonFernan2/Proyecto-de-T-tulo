@@ -204,7 +204,49 @@ const CODIGO_ITEM_RE = /^\d{1,3}(\.\d{1,3}){0,3}$/;
  * Son la referencia del cruce: lo que se evalúa no es cuántas cartillas hay,
  * sino cuáles de las partidas del itemizado tienen su APU.
  */
+/**
+ * Partidas de especialidades: instalaciones que en la práctica van por
+ * subcontrato y cuyas cartillas el estudiante no siempre desarrolla.
+ *
+ * Cuentan igual en la cobertura —la pauta descarta los subcontratos— pero el
+ * informe las nombra aparte, para que el docente decida caso a caso si las
+ * penaliza. Se reconocen por la designación de la partida.
+ */
+const ESPECIALIDAD_RE = new RegExp(
+  [
+    'el[eé]ctric', 'electricidad', 'iluminaci[oó]n', 'empalme', 'tablero',
+    'sanitari', 'alcantarillado', 'agua\\s+potable', 'aguas\\s+lluvias',
+    '\\ba+ll\\b', '\\bapf\\b', '\\bapc\\b', '\\balc\\b', 'gasfiter', 'gasfíter',
+    '\\bgas\\b', 'red\\s+h[uú]meda', 'red\\s+seca', 'incendio', 'rociador',
+    'clima', 'climatiza', 'calefacc', 'ventilaci[oó]n', 'extracci[oó]n\\s+de\\s+aire',
+    'ascensor', 'montacarga', 'cor+ientes\\s+d[eé]biles', 'telecomunicaci',
+    'cit[oó]fon', 'cctv', 'dom[oó]tica', 'fotovolt', 'solar\\s+t[eé]rmic',
+    'riego', 'alarma',
+  ].join('|'),
+  'i',
+);
+
+/** ¿La designación de la partida corresponde a una especialidad? */
+export function esEspecialidad(designacion) {
+  return ESPECIALIDAD_RE.test(String(designacion ?? ''));
+}
+
+/**
+ * Las partidas del listado con su designación, para poder distinguirlas.
+ * Devuelve [{ codigo, designacion, especialidad }].
+ */
+export function extraerPartidasListado(excelData) {
+  return extraerFilasListado(excelData).map(p => ({
+    ...p,
+    especialidad: esEspecialidad(p.designacion),
+  }));
+}
+
 export function extraerItemsListado(excelData) {
+  return extraerFilasListado(excelData).map(p => p.codigo);
+}
+
+function extraerFilasListado(excelData) {
   if (!excelData?.sheets?.length) return [];
 
   // Se prefiere una hoja que se llame listado/itemizado. Si ninguna lo dice
@@ -220,7 +262,7 @@ export function extraerItemsListado(excelData) {
   // itemizado; si así no sale nada, basta con que la fila describa algo. Las
   // unidades se escriben de mil maneras («UD», «C/U», «M.L.») y no reconocer
   // una dejaba el itemizado entero en cero.
-  return buscarItems(hojas, true) || buscarItems(hojas, false) || [];
+  return buscarItems(hojas, true) ?? buscarItems(hojas, false) ?? [];
 }
 
 // El borde \b de JavaScript no considera letra a las vocales acentuadas, así
@@ -234,7 +276,7 @@ const UNIDAD_RE = new RegExp(
 const CABECERA_RE = /^(item|ítem|n[°º]|nro|partida|designaci[oó]n|descripci[oó]n|unidad|cantidad|total)/i;
 
 function buscarItems(hojas, exigirUnidad) {
-  const codigos = [];
+  const partidas = [];
   const vistos = new Set();
 
   for (const hoja of hojas) {
@@ -258,12 +300,19 @@ function buscarItems(hojas, exigirUnidad) {
       // Una partida tiene designación: sin texto es una fila de números sueltos.
       if (!/[a-záéíóúñ]{4}/i.test(texto)) continue;
 
+      // La designación es lo que queda de la fila sin el código ni los números:
+      // es lo que permite reconocer una especialidad.
+      const designacion = row
+        .map(c => String(c?.value ?? '').trim())
+        .filter(v => v && v !== codigo && !/^[\d.,$%\s-]+$/.test(v))
+        .join(' ');
+
       vistos.add(codigo);
-      codigos.push(codigo);
+      partidas.push({ codigo, designacion });
     }
   }
 
-  return codigos.length ? codigos : null;
+  return partidas.length ? partidas : null;
 }
 
 /** Una hoja que trae al menos dos secciones de cartilla APU. */
@@ -298,9 +347,15 @@ const MARCAS_APU = [
  * misma partida.
  */
 export function medirApu(apuData, itemsListado = []) {
+  // Acepta códigos sueltos o partidas con designación: lo segundo es lo que
+  // permite separar las especialidades en el informe.
+  const partidas = itemsListado.map(p =>
+    typeof p === 'string' ? { codigo: p, designacion: '', especialidad: false } : p,
+  );
+
   const vacio = {
     apus: 0, porHoja: [], metodo: 'sin-datos',
-    itemsConApu: [], itemsSinApu: [...itemsListado],
+    itemsConApu: [], itemsSinApu: [...partidas],
     ratio: 0, cruceFiable: false,
   };
   if (!apuData?.sheets?.length) return vacio;
@@ -354,19 +409,19 @@ export function medirApu(apuData, itemsListado = []) {
       ...vacio,
       apus: conContenido,
       metodo: 'hojas-con-contenido',
-      ratio: itemsListado.length ? Math.min(conContenido / itemsListado.length, 1) : 0,
+      ratio: partidas.length ? Math.min(conContenido / partidas.length, 1) : 0,
     };
   }
 
-  const itemsConApu = itemsListado.filter(c => codigosEnApu.has(c));
-  const itemsSinApu = itemsListado.filter(c => !codigosEnApu.has(c));
+  const itemsConApu = partidas.filter(p => codigosEnApu.has(p.codigo));
+  const itemsSinApu = partidas.filter(p => !codigosEnApu.has(p.codigo));
 
   // El cruce solo vale si de verdad se encontraron números de partida dentro de
   // las cartillas; si no, se cae al recuento de cartillas.
-  const cruceFiable = itemsListado.length > 0 && itemsConApu.length > 0;
-  const ratio = itemsListado.length === 0
+  const cruceFiable = partidas.length > 0 && itemsConApu.length > 0;
+  const ratio = partidas.length === 0
     ? 0
-    : Math.min((cruceFiable ? itemsConApu.length : apus) / itemsListado.length, 1);
+    : Math.min((cruceFiable ? itemsConApu.length : apus) / partidas.length, 1);
 
   return {
     apus,

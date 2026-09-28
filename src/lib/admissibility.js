@@ -1,4 +1,4 @@
-import { countListadoItems, medirCotizaciones, extraerItemsListado, medirApu } from './excelMetrics.js';
+import { countListadoItems, medirCotizaciones, extraerPartidasListado, medirApu } from './excelMetrics.js';
 
 // Umbral mínimo exigido para cubicaciones y cotizaciones (pauta: 50%).
 export const UMBRAL_CUBICACIONES = 0.5;
@@ -204,10 +204,16 @@ function checkCotizaciones(filesMap) {
  */
 function primerListadoConItems(candidatos) {
   for (const libro of candidatos) {
-    const items = extraerItemsListado(libro);
+    const items = extraerPartidasListado(libro);
     if (items.length) return items;
   }
   return [];
+}
+
+/** Hasta doce partidas por su número, y el resto contadas. */
+function listar(partidas) {
+  const muestra = partidas.slice(0, 12).map(p => p.codigo).join(', ');
+  return partidas.length > 12 ? `${muestra} y ${partidas.length - 12} más` : muestra;
 }
 
 function checkApu(filesMap) {
@@ -247,8 +253,16 @@ function checkApu(filesMap) {
   detail += ` El itemizado trae ${items.length} partida(s): ${m.itemsConApu.length} con APU (${pct(m.ratio)}).`;
 
   if (m.cruceFiable && m.itemsSinApu.length) {
-    const muestra = m.itemsSinApu.slice(0, 12).join(', ');
-    detail += ` Sin APU: ${muestra}${m.itemsSinApu.length > 12 ? ` y ${m.itemsSinApu.length - 12} más` : ''}.`;
+    // Las especialidades cuentan igual en la cobertura, pero se nombran aparte:
+    // suelen ir por subcontrato y el docente decide si las penaliza.
+    const obra = m.itemsSinApu.filter(p => !p.especialidad);
+    const especialidades = m.itemsSinApu.filter(p => p.especialidad);
+
+    if (obra.length) detail += ` Sin APU: ${listar(obra)}.`;
+    if (especialidades.length) {
+      detail += ` Sin APU, de especialidades: ${listar(especialidades)}`
+              + ` — cuentan en el porcentaje, pero suelen ir por subcontrato.`;
+    }
   } else if (!m.cruceFiable) {
     detail += ' No se identificaron números de partida dentro de las cartillas,'
             + ' así que la comparación es por cantidad y no por cuáles.';
