@@ -196,7 +196,25 @@ export function measureCotizacionesCoverage(excelData) {
   return { quoted, total, ratio };
 }
 
-const CODIGO_ITEM_RE = /^\d{1,3}(\.\d{1,3}){0,3}$/;
+// Los itemizados escriben el código con o sin punto final —«3.2.1» y «3.2.1.»—
+// y bajan más niveles de lo que parece: un itemizado real llega a «6.2.1.2.5»
+// y a seis niveles. Quedarse en cuatro dejaba fuera un tercio de las partidas,
+// que además se confundían con el correlativo de la fila.
+const CODIGO_ITEM_RE = /^\d{1,3}(\.\d{1,3}){0,6}\.?$/;
+
+/** Sin tildes, sin puntuación y en minúsculas, para poder comparar nombres. */
+export function normalizar(texto) {
+  return String(texto ?? '')
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9ñ]+/g, ' ')
+    .trim();
+}
+
+/** El código sin su punto final, para que «3.2.1.» y «3.2.1» sean el mismo. */
+function codigoCanonico(v) {
+  return String(v ?? '').trim().replace(/\.$/, '');
+}
 
 /**
  * Los números de partida del listado, en orden.
@@ -292,7 +310,7 @@ function buscarItems(hojas, exigirUnidad) {
       // Ante un correlativo (1, 2, 3…) y un ítem (1.1, 1.2…) en la misma fila,
       // el ítem es el que lleva punto: quedarse con el primero devolvía la
       // numeración de filas en vez de las partidas.
-      const codigo = candidatos.find(v => v.includes('.')) ?? candidatos[0] ?? null;
+      const codigo = codigoCanonico(candidatos.find(v => v.includes('.')) ?? candidatos[0] ?? '');
       if (!codigo || vistos.has(codigo)) continue;
 
       const texto = row.map(c => String(c?.value ?? '')).join(' ');
@@ -318,6 +336,20 @@ function buscarItems(hojas, exigirUnidad) {
 // Hojas que enumeran partidas pero no las analizan. Sus números de partida no
 // pueden tomarse como prueba de que exista la cartilla.
 const ES_HOJA_DE_LISTADO = /listado|itemizado|actividades?|partidas?|presupuesto|resumen|car[aá]tula|portada|[ií]ndice/i;
+
+/**
+ * ¿Alguna cartilla lleva el nombre de esta partida?
+ *
+ * Se compara normalizado y por contención en ambos sentidos, porque la hoja
+ * abrevia («APU_01 LETRERO DE OBRA») lo que el itemizado escribe entero
+ * («LETRERO DE OBRAS»). Se exige un mínimo de ocho caracteres para que nombres
+ * cortos no emparejen con cualquier cosa.
+ */
+function coincidePorNombre(designacion, nombresEnApu) {
+  const objetivo = normalizar(designacion).replace(/\bref\b/g, '').trim();
+  if (objetivo.length < 8) return false;
+  return nombresEnApu.some(n => n.includes(objetivo) || objetivo.includes(n));
+}
 
 /** Una hoja que trae al menos dos secciones de cartilla APU. */
 function pareceCartillaApu(hoja) {
@@ -366,21 +398,33 @@ export function medirApu(apuData, itemsListado = []) {
 
   const porHoja = [];
   const codigosEnApu = new Set();
+  const nombresEnApu = [];
 
   for (const hoja of apuData.sheets) {
     const filas = hoja.rows ?? [];
     const conteos = MARCAS_APU.map(() => 0);
     const codigosDeLaHoja = new Set();
+    // El nombre de la hoja identifica la cartilla en los libros que las numeran
+    // correlativamente («APU_01 LETRERO DE OBRA») en vez de por código.
+    const nombresDeLaHoja = [normalizar(hoja.name.replace(/^apu[\s_-]*\d*/i, ''))];
 
     for (const row of filas) {
-      const texto = (row ?? []).map(c => String(c?.value ?? '')).join(' ');
+      const celdas = (row ?? []).map(c => String(c?.value ?? '').trim());
+      const texto = celdas.join(' ');
       if (!texto.trim()) continue;
 
       MARCAS_APU.forEach((re, i) => { if (re.test(texto)) conteos[i]++; });
 
-      for (const celda of row ?? []) {
-        const v = String(celda?.value ?? '').trim();
-        if (CODIGO_ITEM_RE.test(v)) codigosDeLaHoja.add(v);
+      for (const v of celdas) {
+        if (CODIGO_ITEM_RE.test(v)) codigosDeLaHoja.add(codigoCanonico(v));
+      }
+
+      // «PARTIDA - ACTIVIDAD | LETRERO DE OBRAS»: el rótulo y, a su derecha, el
+      // nombre de la partida que la cartilla analiza.
+      const iRotulo = celdas.findIndex(v => /^partida\b|partida\s*[-–]\s*actividad/i.test(v));
+      if (iRotulo >= 0) {
+        const nombre = celdas.slice(iRotulo + 1).find(v => v.length > 3 && /[a-záéíóúñ]{3}/i.test(v));
+        if (nombre) nombresDeLaHoja.push(normalizar(nombre));
       }
     }
 
@@ -407,6 +451,7 @@ export function medirApu(apuData, itemsListado = []) {
     // códigos daría por analizada toda partida listada: cobertura del 100% para
     // quien hizo la mitad.
     for (const c of codigosDeLaHoja) codigosEnApu.add(c);
+    for (const n of nombresDeLaHoja) if (n.length >= 8) nombresEnApu.push(n);
   }
 
   const apus = porHoja.reduce((s, h) => s + h.apus, 0);
@@ -423,11 +468,17 @@ export function medirApu(apuData, itemsListado = []) {
     };
   }
 
-  const itemsConApu = partidas.filter(p => codigosEnApu.has(p.codigo));
-  const itemsSinApu = partidas.filter(p => !codigosEnApu.has(p.codigo));
+  // Una partida tiene cartilla si aparece su código o su nombre. Hay libros que
+  // numeran las cartillas correlativamente y no repiten el código en ninguna
+  // parte: ahí el nombre de la partida es lo único que las une.
+  const tieneCartilla = p =>
+    codigosEnApu.has(p.codigo) || coincidePorNombre(p.designacion, nombresEnApu);
 
-  // El cruce solo vale si de verdad se encontraron números de partida dentro de
-  // las cartillas; si no, se cae al recuento de cartillas.
+  const itemsConApu = partidas.filter(tieneCartilla);
+  const itemsSinApu = partidas.filter(p => !tieneCartilla(p));
+
+  // El cruce solo vale si de verdad se reconoció alguna cartilla; si no, se cae
+  // al recuento de cartillas.
   const cruceFiable = partidas.length > 0 && itemsConApu.length > 0;
   const ratio = partidas.length === 0
     ? 0
