@@ -558,8 +558,18 @@ export function medirApu(apuData, itemsListado = []) {
 
       for (const v of celdas.slice(iRotulo + 1, iRotulo + 4)) {
         const c = codigoCanonico(v);
-        if (c) codigosDeLaHoja.add(c);
-        else if (v.length > 3 && /[a-záéíóúñ]{3}/i.test(v)) nombresDeLaHoja.push(normalizar(v));
+        if (c) { codigosDeLaHoja.add(c); continue; }
+
+        // La pauta pide el número y el nombre juntos, y así llegan: «6.1 PVC PN
+        // 10 63 MM». La celda entera no es un código, pero empieza por uno.
+        const [inicio, ...resto] = v.split(/\s+/);
+        const cPrefijo = codigoCanonico(inicio);
+        if (cPrefijo && resto.length) {
+          codigosDeLaHoja.add(cPrefijo);
+          nombresDeLaHoja.push(normalizar(resto.join(' ')));
+        } else if (v.length > 3 && /[a-záéíóúñ]{3}/i.test(v)) {
+          nombresDeLaHoja.push(normalizar(v));
+        }
       }
     }
 
