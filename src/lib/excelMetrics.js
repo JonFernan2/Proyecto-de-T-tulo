@@ -307,10 +307,24 @@ export function extraerPartidasListado(excelData) {
   // Si el itemizado marca sus especialidades, se hace caso a esa marca y solo a
   // ella. Las palabras clave son el último recurso, para los que no las marcan.
   const seMarcanSolas = filas.some(p => marcaEspecialidad(p.fila));
+  const esEsp = p => (seMarcanSolas ? marcaEspecialidad(p.fila) : esEspecialidad(p.designacion));
+
+  // Las especialidades van agrupadas en su propio capítulo: si el itemizado
+  // marca alguna partida de un capítulo, el capítulo entero es de
+  // instalaciones. Sin esto quedaban fuera las subpartidas que no repiten la
+  // marca —doce luminarias del capítulo eléctrico— y se exigía cartilla para
+  // trabajo que va por especialidad.
+  //
+  // Solo se hereda cuando la marca es explícita. Heredar de una palabra clave
+  // condenaba capítulos enteros por una coincidencia de nombre: en un itemizado
+  // sin marcas dio 442 especialidades de 444 partidas.
+  const capitulos = seMarcanSolas
+    ? new Set(filas.filter(esEsp).map(p => p.codigo.split('.')[0]))
+    : null;
 
   return filas.map(({ fila, ...p }) => ({
     ...p,
-    especialidad: seMarcanSolas ? marcaEspecialidad(fila) : esEspecialidad(p.designacion),
+    especialidad: capitulos ? capitulos.has(p.codigo.split('.')[0]) : esEsp({ fila, ...p }),
   }));
 }
 
