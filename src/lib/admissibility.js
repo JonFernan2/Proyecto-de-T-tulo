@@ -26,21 +26,21 @@ export function runAdmissibility(delivery, filesMap) {
   // El listado puede venir como archivo propio o dentro del libro de cubicaciones.
   const nItems = countListadoItems(filesMap.listado ?? filesMap.cubicaciones);
 
-  // ── EETT ────────────────────────────────────────────────────────────────────
-  results.push(checkEett(filesMap.eett));
-
-  // ── Cubicaciones ────────────────────────────────────────────────────────────
-  results.push(checkCubicaciones(filesMap.cubicaciones, nItems));
-
-  // ── Cotizaciones ────────────────────────────────────────────────────────────
-  results.push(checkCotizaciones(filesMap));
-
-  // ── APU (solo E2) ───────────────────────────────────────────────────────────
-  if (delivery === 'E2') results.push(checkApu(filesMap, delivery));
+  // La Entrega 2 es solo la cartilla APU: no se verifica nada más. Comprobar
+  // EETT, cubicaciones y cotizaciones dejaba tres «No se encontró archivo» que
+  // viajaban a la revisión y se imprimían en el informe del estudiante como
+  // incumplimientos, de documentos que esta entrega no pide.
+  if (delivery === 'E2') {
+    results.push(checkApu(filesMap));
+  } else {
+    results.push(checkEett(filesMap.eett));
+    results.push(checkCubicaciones(filesMap.cubicaciones, nItems));
+    results.push(checkCotizaciones(filesMap));
+  }
 
   // En la Entrega 2 no se filtra por admisibilidad: todas las entregas entran a
-  // evaluación. Las verificaciones se conservan porque sí son información —
-  // sobre todo la cobertura del APU— pero no rechazan nada.
+  // evaluación. La cobertura del APU sí es información —y decide aprobar— pero
+  // no rechaza nada.
   const aplicaAdmisibilidad = delivery !== 'E2';
   const passed = aplicaAdmisibilidad ? results.every(r => r.passed) : true;
 
