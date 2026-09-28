@@ -269,24 +269,58 @@ const ESPECIALIDAD_RE = new RegExp(
   'i',
 );
 
+// Cuando el itemizado marca él mismo sus especialidades —«ver detalle en
+// especialidad correspondiente», «S/ESP»— esa marca manda sobre cualquier
+// palabra clave. Adivinar por el nombre de la partida da falsos positivos:
+// «PUERTAS METÁLICAS SALA CLIMA, ELECTRICIDAD» o «ARTEFACTOS SANITARIOS» son
+// partidas que sí se desarrollan.
+const MARCA_ESPECIALIDAD_RE = /ver\s+detalle\s+en\s+especialidad|en\s+especialidad\s+correspondiente|\bs\/\s*esp\b|por\s+especialidad/i;
+
 /** ¿La designación de la partida corresponde a una especialidad? */
 export function esEspecialidad(designacion) {
   return ESPECIALIDAD_RE.test(String(designacion ?? ''));
 }
+
+/** Las filas que el itemizado marca explícitamente como de especialidad. */
+function marcaEspecialidad(texto) {
+  return MARCA_ESPECIALIDAD_RE.test(String(texto ?? ''));
+}
+
+// Lo que va a Gastos Generales no se costea en el APU: la pauta lo determina
+// más adelante, en Proyecto de Título. Contarlo como partida sin cartilla
+// cargaba al estudiante una deuda que la propia pauta le dice que no tenga.
+const EN_GASTOS_GENERALES_RE = /gastos\s+generales/i;
+
+// Una partida cuyo costo va dentro de otra no lleva cartilla propia. La pauta
+// permite expresamente fusionar actividades, y el itemizado lo deja escrito:
+// «Considerado en ítem 3.4.6», «Se incluye en…». Exigirle cartilla sería
+// reprochar precisamente lo que la pauta recomienda.
+const INCLUIDA_EN_OTRA_RE = /(considerad[oa]|inclu[íi]d[oa]|se\s+incluye|contemplad[oa])\s+(en|dentro)/i;
 
 /**
  * Las partidas del listado con su designación, para poder distinguirlas.
  * Devuelve [{ codigo, designacion, especialidad }].
  */
 export function extraerPartidasListado(excelData) {
-  return extraerFilasListado(excelData).map(p => ({
+  const filas = extraerFilasListado(excelData);
+
+  // Si el itemizado marca sus especialidades, se hace caso a esa marca y solo a
+  // ella. Las palabras clave son el último recurso, para los que no las marcan.
+  const seMarcanSolas = filas.some(p => marcaEspecialidad(p.fila));
+
+  return filas.map(({ fila, ...p }) => ({
     ...p,
-    especialidad: esEspecialidad(p.designacion),
+    especialidad: seMarcanSolas ? marcaEspecialidad(fila) : esEspecialidad(p.designacion),
   }));
 }
 
 export function extraerItemsListado(excelData) {
   return extraerFilasListado(excelData).map(p => p.codigo);
+}
+
+/** Lo que va a Gastos Generales no lleva APU y no entra en el itemizado. */
+function esGastoGeneral(fila) {
+  return EN_GASTOS_GENERALES_RE.test(fila);
 }
 
 function extraerFilasListado(excelData) {
@@ -349,6 +383,8 @@ function buscarItems(hojas, exigirUnidad) {
       if (!codigo || vistos.has(codigo)) continue;
 
       const texto = celdas.join(' ');
+      if (esGastoGeneral(texto) || INCLUIDA_EN_OTRA_RE.test(texto)) continue;
+
       // Una partida mide algo: trae unidad o cantidad. Un título de capítulo no
       // trae ninguna de las dos, y así queda fuera sin tener que reconocer cada
       // forma de escribir las unidades. La cantidad se busca DESPUÉS del código,
@@ -371,7 +407,9 @@ function buscarItems(hojas, exigirUnidad) {
         .join(' ');
 
       vistos.add(codigo);
-      partidas.push({ codigo, designacion });
+      // La fila entera se conserva para poder leer las marcas que el propio
+      // itemizado pone («ver detalle en especialidad correspondiente»).
+      partidas.push({ codigo, designacion, fila: texto });
     }
   }
 
@@ -573,8 +611,21 @@ export function medirApu(apuData, itemsListado = []) {
   // Una partida tiene cartilla si aparece su código o su nombre. Hay libros que
   // numeran las cartillas correlativamente y no repiten el código en ninguna
   // parte: ahí el nombre de la partida es lo único que las une.
+  // Una cartilla del código padre cubre a sus subpartidas: el estudiante que
+  // analiza «5.7.1» una vez no tiene que repetirla para 5.7.1.1, 5.7.1.2… Es la
+  // fusión de actividades que la pauta recomienda.
+  const cubiertaPorPadre = codigo => {
+    const partes = codigo.split('.');
+    for (let i = partes.length - 1; i >= 2; i--) {
+      if (codigosEnApu.has(partes.slice(0, i).join('.'))) return true;
+    }
+    return false;
+  };
+
   const tieneCartilla = p =>
-    codigosEnApu.has(p.codigo) || coincidePorNombre(p.designacion, nombresEnApu);
+    codigosEnApu.has(p.codigo)
+    || cubiertaPorPadre(p.codigo)
+    || coincidePorNombre(p.designacion, nombresEnApu);
 
   const itemsConApu = partidas.filter(tieneCartilla);
   const itemsSinApu = partidas.filter(p => !tieneCartilla(p));
