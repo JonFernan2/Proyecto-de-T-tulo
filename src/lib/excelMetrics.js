@@ -315,6 +315,10 @@ function buscarItems(hojas, exigirUnidad) {
   return partidas.length ? partidas : null;
 }
 
+// Hojas que enumeran partidas pero no las analizan. Sus números de partida no
+// pueden tomarse como prueba de que exista la cartilla.
+const ES_HOJA_DE_LISTADO = /listado|itemizado|actividades?|partidas?|presupuesto|resumen|car[aá]tula|portada|[ií]ndice/i;
+
 /** Una hoja que trae al menos dos secciones de cartilla APU. */
 function pareceCartillaApu(hoja) {
   const texto = (hoja.rows ?? [])
@@ -380,14 +384,20 @@ export function medirApu(apuData, itemsListado = []) {
       }
     }
 
+    // Una hoja es de cartillas solo si trae DOS secciones distintas. Con una
+    // bastaba, y el itemizado —que suele nombrar «materiales» en algún capítulo
+    // o llevar una columna «rendimiento»— pasaba por hoja de cartillas: sus
+    // números de partida se daban entonces por analizados y toda la entrega
+    // salía con 100% de cobertura.
+    const presentes = conteos.filter(n => n > 0);
+    if (presentes.length < 2 || ES_HOJA_DE_LISTADO.test(hoja.name)) continue;
+
     // Cada sección debería aparecer una vez por cartilla, pero las hojas
     // repiten esas palabras («COSTO MATERIALES», «TOTAL MANO DE OBRA»), así que
     // el máximo se dispara: llegó a informar 805 cartillas donde había muchas
-    // menos. El mínimo de las secciones que sí aparecen es el recuento que no
-    // inventa cartillas — y como es una estimación de respaldo, conviene que
-    // peque de prudente.
-    const presentes = conteos.filter(n => n > 0);
-    const bloques = presentes.length ? Math.min(...presentes) : 0;
+    // menos. El mínimo de las secciones presentes no inventa cartillas — y como
+    // es una estimación de respaldo, conviene que peque de prudente.
+    const bloques = Math.min(...presentes);
     if (bloques === 0) continue;
 
     porHoja.push({ hoja: hoja.name, apus: bloques });
