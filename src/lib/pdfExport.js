@@ -238,7 +238,22 @@ export function generateFeedbackPDF({ delivery, studentName, admissibility, crit
   y = doc.lastAutoTable.finalY + 6;
 
   // ── Global score box ─────────────────────────────────────────────────────────
-  const boxH = 18;
+  // La caja crece con su texto. Con altura fija, una justificación larga se
+  // salía del recuadro y quedaba cortada a media frase: el estudiante recibía
+  // su nota sin la mitad del motivo.
+  const ANCHO_JUST = W - 28 - 55;
+  const INTERLINEA = 3.6;
+
+  doc.setFontSize(8);
+  doc.setFont('helvetica', 'normal');
+  const justLines = doc.splitTextToSize(globalJustification ?? '', ANCHO_JUST);
+
+  const boxH = Math.max(18, justLines.length * INTERLINEA + 8);
+
+  // Si no cabe entera en lo que queda de página, empieza en la siguiente: la
+  // caja partida por el salto se ve como el texto cortado que se quiere evitar.
+  if (y + boxH > 275) { doc.addPage(); y = 20; }
+
   doc.setFillColor(...BLUE);
   doc.rect(14, y, W - 28, boxH, 'F');
 
@@ -255,13 +270,13 @@ export function generateFeedbackPDF({ delivery, studentName, admissibility, crit
   doc.setFontSize(8);
   doc.setTextColor(...WHITE);
   doc.setFont('helvetica', 'normal');
-  const justLines = doc.splitTextToSize(globalJustification ?? '', W - 28 - 55);
-  doc.text(justLines, 60, y + 6);
+  doc.text(justLines, 60, y + 6, { lineHeightFactor: 1.15 });
 
   y += boxH + 6;
 
   // ── Professor observations ───────────────────────────────────────────────────
   if (globalObservation?.trim()) {
+    if (y > 260) { doc.addPage(); y = 20; }
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(10);
     doc.setTextColor(...DARK_GRAY);
@@ -270,9 +285,14 @@ export function generateFeedbackPDF({ delivery, studentName, admissibility, crit
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
-    const obsLines = doc.splitTextToSize(globalObservation, W - 28);
-    doc.text(obsLines, 14, y);
-    y += obsLines.length * 4 + 4;
+    // Línea a línea, para que una observación larga siga en la página
+    // siguiente en vez de escribirse sobre el pie.
+    for (const linea of doc.splitTextToSize(globalObservation, W - 28)) {
+      if (y > 272) { doc.addPage(); y = 20; }
+      doc.text(linea, 14, y);
+      y += 4;
+    }
+    y += 4;
   }
 
   // ── Per-criterion observations ───────────────────────────────────────────────

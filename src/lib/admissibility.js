@@ -228,7 +228,14 @@ function checkApu(filesMap) {
     'hojas-con-contenido': 'no se reconocieron las secciones (MO / materiales / equipos)',
   }[m.metodo] ?? m.metodo;
 
-  let detail = `${m.apus} cartilla(s) APU detectada(s) · ${comoViene}.`;
+  // El recuento de bloques es una estimación por marcas de sección y se infla
+  // cuando una hoja repite «materiales» o «equipos» en varias filas: para 499
+  // partidas llegó a informar 2.792 cartillas. Cuando el cruce contra el
+  // itemizado funciona, ese cruce es el dato cierto y el recuento sobra.
+  const cruzaBien = items.length > 0 && m.cruceFiable;
+  let detail = cruzaBien
+    ? `Cartillas APU organizadas en ${comoViene}.`
+    : `${m.apus} cartilla(s) APU detectada(s) · ${comoViene}.`;
 
   if (!items.length) {
     detail += ' No se encontró el itemizado —ni dentro del libro ni adjunto—,'
