@@ -299,12 +299,20 @@ function extraerFilasListado(excelData) {
   const porNombre = excelData.sheets.filter(s =>
     /listado|itemizado|actividades?|partidas?/i.test(s.name),
   );
-  const hojas = porNombre.length ? porNombre : excelData.sheets.filter(s => !pareceCartillaApu(s));
+  // Si ninguna hoja se llama itemizado, solo valen las que tengan pinta de
+  // serlo. Antes se miraba cualquier hoja que no fuera una cartilla, y en un
+  // libro sin itemizado se acababa leyendo la planilla de sueldos como si lo
+  // fuera: partidas inventadas y una cobertura del 7% que habría reprobado a
+  // quien tenía casi todo hecho.
+  const hojas = porNombre.length
+    ? porNombre
+    : excelData.sheets.filter(s => !pareceCartillaApu(s) && pareceItemizado(s));
 
-  // Dos pasadas: primero exigiendo unidad de medida, que es lo propio de un
-  // itemizado; si así no sale nada, basta con que la fila describa algo. Las
-  // unidades se escriben de mil maneras («UD», «C/U», «M.L.») y no reconocer
-  // una dejaba el itemizado entero en cero.
+  // Dos pasadas: primero exigiendo que la fila mida algo —unidad o cantidad—,
+  // que es lo propio de una partida y deja fuera los títulos de capítulo; si
+  // así no sale nada, basta con que describa algo. Las unidades se escriben de
+  // mil maneras («UD», «C/U», «M.L.», «N°») y perseguirlas una por una dejaba
+  // partidas sin contar: un itemizado real perdía seis de sus cuarenta filas.
   return buscarItems(hojas, true) ?? buscarItems(hojas, false) ?? [];
 }
 
@@ -328,20 +336,30 @@ function buscarItems(hojas, exigirUnidad) {
 
       // El código no siempre está en la columna A: hay libros con columnas en
       // blanco a la izquierda, o con un correlativo antes del ítem.
-      const candidatos = row.slice(0, 4)
-        .map(c => String(c?.value ?? '').trim())
-        .filter(v => v && !CABECERA_RE.test(v))
-        .map(codigoCanonico)
-        .filter(Boolean);
+      const celdas = row.map(c => String(c?.value ?? '').trim());
+      const candidatos = celdas.slice(0, 4)
+        .map((v, i) => ({ i, codigo: v && !CABECERA_RE.test(v) ? codigoCanonico(v) : null }))
+        .filter(c => c.codigo);
 
       // Ante un correlativo (1, 2, 3…) y un ítem (1.1, A.1, 1/2.1.1) en la
       // misma fila, el ítem es el que tiene más de un nivel: quedarse con el
       // primero devolvía la numeración de filas en vez de las partidas.
-      const codigo = candidatos.find(v => v.includes('.')) ?? candidatos[0] ?? null;
+      const elegido = candidatos.find(c => c.codigo.includes('.')) ?? candidatos[0] ?? null;
+      const codigo = elegido?.codigo ?? null;
       if (!codigo || vistos.has(codigo)) continue;
 
-      const texto = row.map(c => String(c?.value ?? '')).join(' ');
-      if (exigirUnidad && !UNIDAD_RE.test(texto)) continue;
+      const texto = celdas.join(' ');
+      // Una partida mide algo: trae unidad o cantidad. Un título de capítulo no
+      // trae ninguna de las dos, y así queda fuera sin tener que reconocer cada
+      // forma de escribir las unidades. La cantidad se busca DESPUÉS del código,
+      // para no confundirla con el correlativo que va antes.
+      if (exigirUnidad) {
+        const tieneCantidad = celdas.slice(elegido.i + 1).some(v => {
+          const n = parseFloat(v.replace(/[^\d.,-]/g, '').replace(/\.(?=\d{3}\b)/g, '').replace(',', '.'));
+          return Number.isFinite(n) && n > 0;
+        });
+        if (!UNIDAD_RE.test(texto) && !tieneCantidad) continue;
+      }
       // Una partida tiene designación: sin texto es una fila de números sueltos.
       if (!/[a-záéíóúñ]{4}/i.test(texto)) continue;
 
@@ -411,6 +429,18 @@ function coincidePorNombre(designacion, nombresEnApu) {
   });
 }
 
+/**
+ * ¿Tiene esta hoja la cabecera de un itemizado? Se exigen dos de las cuatro
+ * columnas que lo definen, para no confundirlo con cualquier tabla del libro.
+ */
+function pareceItemizado(hoja) {
+  const COLUMNAS = [/\b[ií]tem\b/i, /descripci[oó]n|designaci[oó]n/i, /\bunidad\b/i, /\bcantidad\b/i];
+  return (hoja.rows ?? []).slice(0, 40).some(row => {
+    const texto = (row ?? []).map(c => String(c?.value ?? '')).join(' ');
+    return COLUMNAS.filter(re => re.test(texto)).length >= 2;
+  });
+}
+
 /** Una hoja que trae al menos dos secciones de cartilla APU. */
 function pareceCartillaApu(hoja) {
   const texto = (hoja.rows ?? [])
@@ -459,6 +489,7 @@ export function medirApu(apuData, itemsListado = []) {
   const porHoja = [];
   const codigosEnApu = new Set();
   const nombresEnApu = [];
+  const identidades = [];
 
   for (const hoja of apuData.sheets) {
     const filas = hoja.rows ?? [];
@@ -517,10 +548,12 @@ export function medirApu(apuData, itemsListado = []) {
     // códigos daría por analizada toda partida listada: cobertura del 100% para
     // quien hizo la mitad.
     for (const c of codigosDeLaHoja) codigosEnApu.add(c);
-    for (const n of nombresDeLaHoja) {
-      const pal = palabrasDePartida(n);
-      if (pal.length) nombresEnApu.push(pal);
-    }
+    const palabras = nombresDeLaHoja.map(palabrasDePartida).filter(p => p.length);
+    for (const pal of palabras) nombresEnApu.push(pal);
+
+    // La pauta exige que cada cartilla lleve arriba el número y el nombre de su
+    // partida. Se anota cuáles no lo traen, para poder observarlo.
+    identidades.push({ hoja: hoja.name, codigos: [...codigosDeLaHoja], palabras });
   }
 
   const apus = porHoja.reduce((s, h) => s + h.apus, 0);
@@ -550,7 +583,16 @@ export function medirApu(apuData, itemsListado = []) {
   // recuento de cartillas daba un 100% con cero coincidencias, que es peor que
   // no informar nada: da por aprobado lo que no se comprobó.
   const cruceFiable = partidas.length > 0 && itemsConApu.length > 0;
-  const ratio = cruceFiable ? Math.min(itemsConApu.length / partidas.length, 1) : 0;
+
+  // Se exige el 100% del itemizado, menos las especialidades: esas no se
+  // desarrollan, así que no pueden contar como deuda. El denominador son las
+  // partidas exigibles, no todas.
+  const codigosDelListado = new Set(partidas.map(p => p.codigo));
+  const exigibles = partidas.filter(p => !p.especialidad);
+  const exigiblesConApu = exigibles.filter(tieneCartilla);
+  const ratio = cruceFiable && exigibles.length
+    ? Math.min(exigiblesConApu.length / exigibles.length, 1)
+    : 0;
 
   return {
     apus,
@@ -560,6 +602,17 @@ export function medirApu(apuData, itemsListado = []) {
       : 'cartillas-dentro-de-la-hoja',
     itemsConApu,
     itemsSinApu,
+    // Cartillas que no dicen a qué partida del itemizado corresponden. La pauta
+    // exige el número y el nombre en el detalle superior de cada una.
+    cartillasSinIdentificar: identidades
+      .filter(id => !id.codigos.some(c => codigosDelListado.has(c))
+                 && !id.palabras.some(pal => partidas.some(p => coincidePorNombre(p.designacion, [pal]))))
+      .map(id => id.hoja),
+    // El desglose del denominador, para poder explicarlo en el informe.
+    totalPartidas: partidas.length,
+    exigibles: exigibles.length,
+    exigiblesConApu: exigiblesConApu.length,
+    especialidades: partidas.length - exigibles.length,
     ratio,
     cruceFiable,
   };

@@ -261,19 +261,27 @@ function checkApu(filesMap) {
     return { ...base, passed: true, detail };
   }
 
-  detail += ` El itemizado trae ${items.length} partida(s): ${m.itemsConApu.length} con APU (${pct(m.ratio)}).`;
+  // Se exige el 100% del itemizado menos las especialidades, que no se
+  // desarrollan: ese es el denominador, y conviene que el informe lo explique
+  // para que la cifra pueda comprobarse.
+  detail += ` El itemizado trae ${m.totalPartidas} partida(s)`;
+  if (m.especialidades) {
+    detail += `, de las cuales ${m.especialidades} son de especialidades y no se exigen`;
+  }
+  detail += `. De las ${m.exigibles} exigibles, ${m.exigiblesConApu} tienen APU (${pct(m.ratio)}).`;
 
-  if (m.itemsSinApu.length) {
-    // Las especialidades cuentan igual en la cobertura, pero se nombran aparte:
-    // suelen ir por subcontrato y el docente decide si las penaliza.
-    const obra = m.itemsSinApu.filter(p => !p.especialidad);
-    const especialidades = m.itemsSinApu.filter(p => p.especialidad);
+  const sinApuExigibles = m.itemsSinApu.filter(p => !p.especialidad);
+  if (sinApuExigibles.length) detail += ` Sin APU: ${listar(sinApuExigibles)}.`;
 
-    if (obra.length) detail += ` Sin APU: ${listar(obra)}.`;
-    if (especialidades.length) {
-      detail += ` Sin APU, de especialidades: ${listar(especialidades)}`
-              + ` — cuentan en el porcentaje, pero suelen ir por subcontrato.`;
-    }
+  // La pauta exige el número y el nombre de la partida en el detalle superior
+  // de cada cartilla. Sin eso no hay forma de saber qué analiza, y es un reparo
+  // por sí mismo — aparte de lo que haga con la cobertura.
+  if (m.cartillasSinIdentificar?.length) {
+    const muestra = m.cartillasSinIdentificar.slice(0, 8).join(', ');
+    const resto = m.cartillasSinIdentificar.length - 8;
+    detail += ` ${m.cartillasSinIdentificar.length} cartilla(s) no indican a qué partida`
+            + ` del itemizado corresponden (${muestra}${resto > 0 ? ` y ${resto} más` : ''}):`
+            + ` la pauta pide el número y el nombre de la partida en su detalle superior.`;
   }
 
   // Bajo el 80% de las partidas con APU el estudiante no aprueba el ramo. Se
