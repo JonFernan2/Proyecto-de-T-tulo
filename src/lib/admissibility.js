@@ -1,4 +1,4 @@
-import { countListadoItems, medirCotizaciones, extraerPartidasListado, medirApu } from './excelMetrics.js';
+import { countListadoItems, medirCotizaciones, extraerPartidasListado, extraerPartidasDePdf, medirApu } from './excelMetrics.js';
 
 // Umbral mínimo exigido para cubicaciones y cotizaciones (pauta: 50%).
 export const UMBRAL_CUBICACIONES = 0.5;
@@ -202,9 +202,16 @@ function checkCotizaciones(filesMap) {
  * su cartilla, no cuántas hojas trae el libro: las cartillas pueden ir una por
  * hoja o todas dentro de la misma, y ambas formas son válidas.
  */
-function primerListadoConItems(candidatos) {
-  for (const libro of candidatos) {
+function primerListadoConItems(libros, pdfs = []) {
+  for (const libro of libros) {
     const items = extraerPartidasListado(libro);
+    if (items.length) return items;
+  }
+
+  // El itemizado puede venir en PDF: hay estudiantes que solo lo tienen así.
+  for (const pdf of pdfs) {
+    if (!/itemizado|listado|partidas|presupuesto/i.test(pdf.name ?? '')) continue;
+    const items = extraerPartidasDePdf(pdf.pages ?? []);
     if (items.length) return items;
   }
   return [];
@@ -225,7 +232,10 @@ function checkApu(filesMap) {
 
   // El entregable es solo el libro de APU, así que el itemizado rara vez llega
   // aparte: se busca donde pueda estar, empezando por dentro del propio libro.
-  const items = primerListadoConItems([filesMap.listado, filesMap.cubicaciones, filesMap.apu]);
+  const items = primerListadoConItems(
+    [filesMap.listado, filesMap.cubicaciones, filesMap.apu],
+    filesMap.respaldoPdfs,
+  );
   const m = medirApu(filesMap.apu, items);
 
   const comoViene = {

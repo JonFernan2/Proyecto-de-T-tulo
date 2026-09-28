@@ -337,6 +337,44 @@ function esGastoGeneral(fila) {
   return EN_GASTOS_GENERALES_RE.test(fila);
 }
 
+/**
+ * Las partidas de un itemizado entregado en PDF.
+ *
+ * Al leer un PDF se pierde la estructura de filas —todo el texto de la página
+ * llega seguido— así que no se puede recorrer por líneas. Sí se puede trocear
+ * por los códigos: entre un código y el siguiente está la designación, y al
+ * final de ella la unidad, que es lo que distingue una partida de un título de
+ * capítulo.
+ */
+export function extraerPartidasDePdf(paginas) {
+  const texto = (Array.isArray(paginas) ? paginas : [paginas]).join(' ')
+    .replace(/\s+/g, ' ');
+
+  const codigos = [...texto.matchAll(/(?<![\d.,])\d{1,3}(?:[.,]\d{1,3}){1,6}(?![\d.,])/g)];
+  const partidas = [];
+  const vistos = new Set();
+
+  for (let i = 0; i < codigos.length; i++) {
+    const codigo = codigoCanonico(codigos[i][0]);
+    if (!codigo || vistos.has(codigo)) continue;
+
+    const desde = codigos[i].index + codigos[i][0].length;
+    const hasta = codigos[i + 1]?.index ?? texto.length;
+    const resto = texto.slice(desde, hasta).trim();
+
+    // Una partida termina en su unidad; un título de capítulo no la lleva.
+    if (!resto || resto.length > 160) continue;
+    if (!UNIDAD_RE.test(resto)) continue;
+    if (!/[a-záéíóúñ]{4}/i.test(resto)) continue;
+    if (esGastoGeneral(resto) || INCLUIDA_EN_OTRA_RE.test(resto)) continue;
+
+    vistos.add(codigo);
+    partidas.push({ codigo, designacion: resto, fila: `${codigo} ${resto}` });
+  }
+
+  return partidas;
+}
+
 function extraerFilasListado(excelData) {
   if (!excelData?.sheets?.length) return [];
 
