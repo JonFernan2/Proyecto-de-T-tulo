@@ -89,15 +89,13 @@ export const DELIVERIES = {
           'Arriendo vs propiedad. Desgaste 0,02% para propios. Valor/rendimiento para arrendados.',
       },
     ],
-    // La entrega es UN SOLO Excel con los métodos constructivos y las cartillas
-    // APU juntos. Lo de la Entrega 1 puede volver a adjuntarse para el cruce,
-    // pero exigirlo dejaría al docente sin poder continuar teniendo la entrega
-    // completa delante.
+    // La entrega es UN SOLO Excel: la cartilla del Anexo 01, con el método
+    // constructivo y el análisis de precios de cada partida. Nada más se pide.
+    // El itemizado aparece como opcional únicamente porque es contra lo que se
+    // cruzan las cartillas; si viene dentro del mismo libro, no hace falta.
     expectedFiles: [
-      { role: 'apu', label: 'Excel de Métodos Constructivos + APU', formats: ['xlsx'], required: true, multiple: true },
-      { role: 'cubicaciones', label: 'Listado + Cubicaciones E1 (para el cruce)', formats: [], required: false, multiple: true },
-      { role: 'eett', label: 'EETT E1 (re-verificación)', formats: [], required: false, multiple: false },
-      { role: 'cotizaciones', label: 'Cotizaciones E1 (precios de referencia)', formats: [], required: false, multiple: true },
+      { role: 'apu', label: 'Cartilla APU — Anexo 01 (métodos + precios unitarios)', formats: ['xlsx'], required: true, multiple: true },
+      { role: 'listado', label: 'Itemizado E1 — solo si no viene dentro del libro', formats: ['xlsx'], required: false, multiple: false },
     ],
     admissibility: {
       eett: { required: true, threshold: 1.0, label: 'EETT (100% obligatorio)' },

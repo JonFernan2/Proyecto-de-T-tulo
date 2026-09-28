@@ -202,6 +202,14 @@ function checkCotizaciones(filesMap) {
  * su cartilla, no cuántas hojas trae el libro: las cartillas pueden ir una por
  * hoja o todas dentro de la misma, y ambas formas son válidas.
  */
+function primerListadoConItems(candidatos) {
+  for (const libro of candidatos) {
+    const items = extraerItemsListado(libro);
+    if (items.length) return items;
+  }
+  return [];
+}
+
 function checkApu(filesMap) {
   const base = { id: 'apu', label: 'APU Cartillas (una por partida del itemizado)' };
 
@@ -209,7 +217,9 @@ function checkApu(filesMap) {
     return { ...base, passed: false, detail: 'No se encontró archivo APU.' };
   }
 
-  const items = extraerItemsListado(filesMap.listado ?? filesMap.cubicaciones);
+  // El entregable es solo el libro de APU, así que el itemizado rara vez llega
+  // aparte: se busca donde pueda estar, empezando por dentro del propio libro.
+  const items = primerListadoConItems([filesMap.listado, filesMap.cubicaciones, filesMap.apu]);
   const m = medirApu(filesMap.apu, items);
 
   const comoViene = {
@@ -221,7 +231,9 @@ function checkApu(filesMap) {
   let detail = `${m.apus} cartilla(s) APU detectada(s) · ${comoViene}.`;
 
   if (!items.length) {
-    detail += ' No se pudo leer el itemizado, así que no hay con qué cruzarlas.';
+    detail += ' No se encontró el itemizado —ni dentro del libro ni adjunto—,'
+            + ' así que no hay contra qué cruzar las cartillas. Para saber qué'
+            + ' partidas quedaron sin APU, adjunta el itemizado de la Entrega 1.';
     return { ...base, passed: true, detail };
   }
 

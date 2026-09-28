@@ -798,32 +798,49 @@ La sección LISTADO es la referencia base para la evaluación cruzada.\n\n`;
 
   } else {
     // ── E2 ───────────────────────────────────────────────────────────────────
-    text += `<seccion id="eett" documento="Especificaciones Técnicas E1">\n`;
-    text += formatEett(eett);
-    text += `</seccion>\n\n`;
+    // La Entrega 2 es UN SOLO libro de APU. Lo de la Entrega 1 puede adjuntarse
+    // para cruzar, pero normalmente no está: emitir esas secciones vacías haría
+    // que la revisión diera por faltante lo que no se pedía.
+    if (eett?.text?.trim()) {
+      text += `<seccion id="eett" documento="Especificaciones Técnicas E1">\n`;
+      text += formatEett(eett);
+      text += `</seccion>\n\n`;
+    }
 
     const { listadoText, cubicacionesText, nListado, nCubSheets } =
       splitListadoYCubicaciones(cubicaciones, listado);
 
-    text += `<seccion id="listado" documento="Listado de Actividades E1" n_actividades="${nListado}">\n`;
-    text += listadoText;
-    text += `</seccion>\n\n`;
-
-    text += `<seccion id="cubicaciones" documento="Cubicaciones E1" n_hojas="${nCubSheets}">\n`;
-    text += cubicacionesText;
-    text += `</seccion>\n\n`;
-
-    text += `<seccion id="cotizaciones" documento="Cotizaciones E1">\n`;
-    const wordCots = (cotizacionesFiles ?? []).filter(f => f.parsed?.text !== undefined);
-    if (wordCots.length > 0) {
-      wordCots.forEach(({ name, parsed }) => {
-        text += `\n**Archivo: ${name}**\n`;
-        text += formatEett(parsed);
-      });
-    } else {
-      text += formatExcel('', cotizaciones);
+    if (nListado > 0) {
+      text += `<seccion id="listado" documento="Listado de Actividades E1" n_actividades="${nListado}">\n`;
+      text += listadoText;
+      text += `</seccion>\n\n`;
     }
-    text += `</seccion>\n\n`;
+
+    if (nCubSheets > 0) {
+      text += `<seccion id="cubicaciones" documento="Cubicaciones E1" n_hojas="${nCubSheets}">\n`;
+      text += cubicacionesText;
+      text += `</seccion>\n\n`;
+    }
+
+    const wordCots = (cotizacionesFiles ?? []).filter(f => f.parsed?.text !== undefined);
+    if (wordCots.length > 0 || cotizaciones?.sheets?.length) {
+      text += `<seccion id="cotizaciones" documento="Cotizaciones E1">\n`;
+      if (wordCots.length > 0) {
+        wordCots.forEach(({ name, parsed }) => {
+          text += `\n**Archivo: ${name}**\n`;
+          text += formatEett(parsed);
+        });
+      } else {
+        text += formatExcel('', cotizaciones);
+      }
+      text += `</seccion>\n\n`;
+    }
+
+    if (!nListado && !nCubSheets && !wordCots.length && !cotizaciones?.sheets?.length) {
+      text += `NOTA: solo se entregó el libro de APU, que es lo que pide esta entrega.\n`
+            + `No se adjuntaron los documentos de la Entrega 1, así que NO observes su\n`
+            + `ausencia ni la trates como incumplimiento.\n\n`;
+    }
 
     text += `<seccion id="apu" documento="APU — Análisis de Precios Unitarios">\n`;
     text += `ESTE ES EL APU — contiene mano de obra, materiales, fletes y equipos por partida.\n`;

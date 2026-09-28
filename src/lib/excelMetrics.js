@@ -269,6 +269,7 @@ export function medirApu(apuData, itemsListado = []) {
   for (const hoja of apuData.sheets) {
     const filas = hoja.rows ?? [];
     const conteos = MARCAS_APU.map(() => 0);
+    const codigosDeLaHoja = new Set();
 
     for (const row of filas) {
       const texto = (row ?? []).map(c => String(c?.value ?? '')).join(' ');
@@ -278,14 +279,22 @@ export function medirApu(apuData, itemsListado = []) {
 
       for (const celda of row ?? []) {
         const v = String(celda?.value ?? '').trim();
-        if (CODIGO_ITEM_RE.test(v)) codigosEnApu.add(v);
+        if (CODIGO_ITEM_RE.test(v)) codigosDeLaHoja.add(v);
       }
     }
 
     // Cada sección aparece una vez por cartilla, pero no todas las cartillas
     // traen todas: el máximo es la mejor estimación del número de bloques.
     const bloques = Math.max(...conteos);
-    if (bloques > 0) porHoja.push({ hoja: hoja.name, apus: bloques });
+    if (bloques === 0) continue;
+
+    porHoja.push({ hoja: hoja.name, apus: bloques });
+
+    // Los números de partida solo cuentan si vienen de una hoja que de verdad
+    // trae cartillas. El itemizado suele ir dentro del mismo libro, y tomar sus
+    // códigos daría por analizada toda partida listada: cobertura del 100% para
+    // quien hizo la mitad.
+    for (const c of codigosDeLaHoja) codigosEnApu.add(c);
   }
 
   const apus = porHoja.reduce((s, h) => s + h.apus, 0);
