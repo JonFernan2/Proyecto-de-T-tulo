@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { construirFilesMap, extraerImagenes } from '../lib/roles.js';
+import { normalizarEvaluacion } from '../lib/evaluacion.js';
 
 const STEPS = ['setup', 'upload', 'admissibility', 'evaluating', 'results'];
 
@@ -69,7 +70,7 @@ export const useGradingStore = create((set, get) => ({
   // ── Evaluation ───────────────────────────────────────────────────────────────
   evaluation: null,      // raw from Claude
   evalError: null,
-  setEvaluation: ev => set({ evaluation: ev, evalError: null }),
+  setEvaluation: ev => set({ evaluation: normalizarEvaluacion(ev), evalError: null }),
   setEvalError: e => set({ evalError: e }),
 
   // ── Professor adjustments ────────────────────────────────────────────────────
@@ -91,9 +92,12 @@ export const useGradingStore = create((set, get) => ({
    * guardadas en el servidor y se recuperan por su lote, así que ajustar notas
    * y exportar no obliga a volver a subir nada ni a pagar la revisión de nuevo.
    */
-  abrirResultado({ studentName, delivery, evaluation, cobertura, admissibility }) {
+  abrirResultado({ studentName, delivery, evaluation: cruda, cobertura, admissibility }) {
+    // Se normaliza aquí, en la entrada: lo que viene guardado puede no cumplir
+    // el esquema, y sin esto la pantalla de resultados se cae al pintarlo.
+    const evaluation = normalizarEvaluacion(cruda);
     const ajustes = {};
-    for (const c of evaluation.criteria ?? []) {
+    for (const c of evaluation?.criteria ?? []) {
       ajustes[c.id] = { score: c.score, observation: '' };
     }
     set({
@@ -103,10 +107,10 @@ export const useGradingStore = create((set, get) => ({
       uploadedFiles: [],
       admissibility: admissibility ?? null,
       revisionPendiente: null,
-      evaluation: { ...evaluation, cobertura },
+      evaluation: evaluation ? { ...evaluation, cobertura } : null,
       evalError: null,
       adjustments: ajustes,
-      globalScore: evaluation.globalScore ?? null,
+      globalScore: evaluation?.globalScore ?? null,
       globalScoreManual: false,
       globalObservation: '',
       globalJustificationEdit: null,

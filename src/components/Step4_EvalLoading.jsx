@@ -3,6 +3,7 @@ import { useGradingStore } from '../store/useGradingStore.js';
 import { deepReview, resumeDeepReview, verifyImages } from '../lib/claudeEval.js';
 import { DELIVERIES } from '../lib/rubric.js';
 import { ponderar } from '../lib/notas.js';
+import { normalizarEvaluacion } from '../lib/evaluacion.js';
 
 const ETIQUETAS = {
   cub: 'Cubicaciones',
@@ -40,7 +41,7 @@ export default function Step4_EvalLoading() {
       // ── Revisión profunda hoja por hoja ─────────────────────────────────────
       // Si se está retomando una ya lanzada, no se vuelve a enviar: el lote
       // sigue procesándose del lado de la API y ya está pagado.
-      const { evaluation, cobertura } = revisionPendiente
+      const { evaluation: cruda, cobertura } = revisionPendiente
         ? await resumeDeepReview({
             batchId: revisionPendiente.batchId,
             plan: revisionPendiente.plan,
@@ -54,6 +55,11 @@ export default function Step4_EvalLoading() {
             shouldCancel: () => cancelado.current,
           });
 
+      // Se normaliza antes de tocarla: lo que devuelve la revisión no siempre
+      // cumple el esquema —listas que llegan como párrafo, notas como texto— y
+      // más abajo se recorre y se le añaden hallazgos.
+      const evaluation = normalizarEvaluacion(cruda);
+      if (!evaluation) throw new Error('La revisión no devolvió una evaluación utilizable.');
       evaluation.cobertura = cobertura;
 
       // ── Respaldo fotográfico ────────────────────────────────────────────────
