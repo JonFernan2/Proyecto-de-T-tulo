@@ -5,6 +5,31 @@ import CriterionCard from './CriterionCard.jsx';
 import { generateFeedbackPDF } from '../lib/pdfExport.js';
 import { PASOS_NOTA, ponderar, desglose, formatoNota } from '../lib/notas.js';
 
+/**
+ * Todo lo que llega de la revisión se pinta a través de aquí.
+ *
+ * El esquema pide texto, pero si alguna vez llega un objeto, React no lo
+ * muestra: lanza y deja la pantalla en blanco, sin nota y sin informe. Una
+ * corrección terminada no puede perderse por eso.
+ */
+function texto(v) {
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  if (Array.isArray(v)) return v.map(texto).filter(Boolean).join(' · ');
+  // De un objeto se prefieren los campos con los que se suele describir algo.
+  const preferidos = ['texto', 'descripcion', 'detalle', 'hallazgo', 'aspecto', 'nombre', 'label'];
+  for (const k of preferidos) if (typeof v[k] === 'string') return v[k];
+  return Object.values(v).map(texto).filter(Boolean).join(' · ');
+}
+
+/** Una nota siempre es número: si llega como «4,5» se convierte, y si no, 1,0. */
+function aNota(v) {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  const n = parseFloat(String(v ?? '').replace(',', '.'));
+  return Number.isFinite(n) ? n : 1.0;
+}
+
 const ESTADO_STYLES = {
   'Cumple': 'bg-green-100 text-green-700',
   'Parcial': 'bg-amber-100 text-amber-700',
@@ -35,14 +60,14 @@ export default function Step5_Results() {
     const adj = adjustments[rc.id] ?? {};
     return {
       ...rc,
-      aiScore: aiCrit.score ?? 1.0,
-      aiJustification: aiCrit.justification ?? '',
-      professorScore: adj.score ?? aiCrit.score ?? 1.0,
+      aiScore: aNota(aiCrit.score),
+      aiJustification: texto(aiCrit.justification),
+      professorScore: adj.score ?? aNota(aiCrit.score),
       professorObservation: adj.observation ?? '',
     };
   });
 
-  const aiGlobal = evaluation.globalScore ?? 1.0;
+  const aiGlobal = aNota(evaluation.globalScore);
 
   // El promedio ponderado de las notas que están puestas ahora mismo. Es la
   // nota final salvo que el docente la haya fijado a mano.
@@ -139,7 +164,7 @@ export default function Step5_Results() {
           )}
 
           <textarea
-            value={justificacion}
+            value={texto(justificacion)}
             onChange={e => setGlobalJustification(e.target.value)}
             rows={6}
             className={`w-full text-sm text-slate-700 leading-relaxed bg-white border rounded-lg px-3 py-2
@@ -170,11 +195,11 @@ export default function Step5_Results() {
               <tbody>
                 {evaluation.resumen.map((r, i) => (
                   <tr key={i} className="border-t border-slate-100 align-top">
-                    <td className="px-4 py-2.5 font-medium text-slate-700">{r.aspecto}</td>
-                    <td className="px-4 py-2.5 text-slate-600 leading-relaxed">{r.hallazgo}</td>
+                    <td className="px-4 py-2.5 font-medium text-slate-700">{texto(r.aspecto)}</td>
+                    <td className="px-4 py-2.5 text-slate-600 leading-relaxed">{texto(r.hallazgo)}</td>
                     <td className="px-4 py-2.5 text-center">
                       <span className={`inline-block px-2 py-0.5 rounded text-xs font-semibold whitespace-nowrap ${ESTADO_STYLES[r.estado] ?? 'bg-slate-100 text-slate-600'}`}>
-                        {r.estado}
+                        {texto(r.estado)}
                       </span>
                     </td>
                   </tr>
@@ -197,7 +222,7 @@ export default function Step5_Results() {
                 {evaluation.fortalezas.map((f, i) => (
                   <li key={i} className="text-sm text-slate-700 flex gap-2">
                     <span className="text-green-600 shrink-0">✓</span>
-                    <span>{f}</span>
+                    <span>{texto(f)}</span>
                   </li>
                 ))}
               </ul>
@@ -212,7 +237,7 @@ export default function Step5_Results() {
                 {evaluation.mejoras.map((m, i) => (
                   <li key={i} className="text-sm text-slate-700 flex gap-2">
                     <span className="text-amber-600 shrink-0">→</span>
-                    <span>{m}</span>
+                    <span>{texto(m)}</span>
                   </li>
                 ))}
               </ul>
