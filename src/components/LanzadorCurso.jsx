@@ -19,6 +19,11 @@ export default function LanzadorCurso({ carpetas, delivery, onListo, onCancelar 
   const [estado, setEstado] = useState('confirmar');   // confirmar | lanzando | listo
   const [progreso, setProgreso] = useState([]);
   const [actual, setActual] = useState(null);
+  // Estudiantes a los que no se les lanzó la revisión porque no había itemizado
+  // contra el cual cruzar sus cartillas. Se guardan por carpeta, no sus archivos
+  // ya leídos: un libro de APU pesa decenas de MB y retenerlos los dejaría a
+  // todos en memoria a la vez.
+  const [sinItemizado, setSinItemizado] = useState([]);
 
   const alumnos = [...carpetas.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 
@@ -26,38 +31,78 @@ export default function LanzadorCurso({ carpetas, delivery, onListo, onCancelar 
   // entregan como archivo aparte solo se cotejan en la revisión individual.
   const conImagenesSueltas = alumnos.filter(([, archivos]) => archivos.some(f => ES_IMAGEN.test(f.name)));
 
-  async function lanzarTodo() {
-    setEstado('lanzando');
+  /**
+   * Lee los archivos de un estudiante y lanza su revisión.
+   *
+   * En la Entrega 2 se comprueba antes de enviar que las cartillas puedan
+   * cruzarse contra el itemizado, y si no se puede NO se lanza: la revisión se
+   * cobra igual y vuelve sin lo único que decide si aprueba el ramo —cuántas
+   * partidas tienen APU—. Casi siempre falta porque el itemizado es un archivo
+   * de la Entrega 1 y no está en la carpeta, así que se avisa a tiempo para
+   * agregarlo. Con `forzar` se lanza de todos modos.
+   */
+  async function procesar(carpeta, archivos, { forzar = false } = {}) {
+    const studentName = detectStudentName(carpeta) || carpeta;
+    setActual(studentName);
+
+    const entradas = [];
+    for (const file of archivos) {
+      if (ES_IMAGEN.test(file.name)) continue;
+      entradas.push({ file, role: guessRole(file, delivery), parsed: await parsear(file) });
+    }
+
+    const filesMap = construirFilesMap(entradas);
+    const admissibility = runAdmissibility(delivery, filesMap);
+
+    if (!forzar && delivery === 'E2' && !seCruzaConElItemizado(admissibility)) {
+      return { studentName, carpeta, ok: false, faltaItemizado: true };
+    }
+
+    const { batchId, totalTandas, plan } = await lanzarRevision({
+      delivery, studentName, filesMap, admissibility,
+    });
+    return { studentName, batchId, totalTandas, plan, ok: true };
+  }
+
+  async function lanzar(lista, opciones) {
     const resultados = [];
+    const faltantes = [];
 
-    for (const [carpeta, archivos] of alumnos) {
+    for (const [carpeta, archivos] of lista) {
       const studentName = detectStudentName(carpeta) || carpeta;
-      setActual(studentName);
-
       try {
-        // Parsear los archivos de este estudiante
-        const entradas = [];
-        for (const file of archivos) {
-          if (ES_IMAGEN.test(file.name)) continue;
-          entradas.push({ file, role: guessRole(file, delivery), parsed: await parsear(file) });
+        const r = await procesar(carpeta, archivos, opciones);
+        if (r.faltaItemizado) {
+          faltantes.push([carpeta, archivos]);
+          setProgreso(p => [...p, { studentName, ok: false, faltaItemizado: true }]);
+          continue;
         }
-
-        const filesMap = construirFilesMap(entradas);
-        const admissibility = runAdmissibility(delivery, filesMap);
-
-        const { batchId, totalTandas, plan } = await lanzarRevision({
-          delivery, studentName, filesMap, admissibility,
-        });
-
-        resultados.push({ studentName, batchId, totalTandas, plan, ok: true });
-        setProgreso(p => [...p, { studentName, ok: true, totalTandas }]);
+        resultados.push(r);
+        setProgreso(p => [...p, { studentName, ok: true, totalTandas: r.totalTandas }]);
       } catch (err) {
         console.error(`[curso] ${studentName}:`, err);
         resultados.push({ studentName, ok: false, error: err.message });
         setProgreso(p => [...p, { studentName, ok: false, error: err.message }]);
       }
     }
+    return { resultados, faltantes };
+  }
 
+  async function lanzarTodo() {
+    setEstado('lanzando');
+    const { resultados, faltantes } = await lanzar(alumnos);
+    setSinItemizado(faltantes);
+    setActual(null);
+    setEstado('listo');
+    onListo?.(resultados);
+  }
+
+  /** Lanza igual a los que quedaron sin itemizado, si el docente lo decide. */
+  async function lanzarSinCruce() {
+    const pendientes = sinItemizado;
+    setSinItemizado([]);
+    setEstado('lanzando');
+    const { resultados } = await lanzar(pendientes, { forzar: true });
     setActual(null);
     setEstado('listo');
     onListo?.(resultados);
@@ -97,6 +142,14 @@ export default function LanzadorCurso({ carpetas, delivery, onListo, onCancelar 
               aparte. Las imágenes incrustadas en las hojas sí se revisan; las sueltas
               quedan fuera y hay que verlas en la revisión individual
               ({conImagenesSueltas.map(([c]) => detectStudentName(c) || c).join(', ')}).
+            </div>
+          )}
+          {delivery === 'E2' && (
+            <div>
+              A quien no tenga itemizado —dentro de su libro de APU o adjunto como
+              archivo— no se le lanzará la revisión: volvería sin el porcentaje de
+              partidas con APU, que es lo que decide si aprueba. Si falta, suele estar
+              en su carpeta de la Entrega 1; cópialo junto al APU y vuelve a cargar.
             </div>
           )}
         </div>
@@ -148,21 +201,47 @@ export default function LanzadorCurso({ carpetas, delivery, onListo, onCancelar 
         {progreso.map((p, i) => (
           <div key={i} className="flex items-start justify-between gap-3 bg-white border border-slate-100 rounded-lg px-3 py-1.5">
             <span className="text-slate-800 truncate">{p.studentName}</span>
-            <span className={`text-xs shrink-0 ${p.ok ? 'text-green-600' : 'text-red-600'}`}>
-              {p.ok ? `${p.totalTandas} tandas` : p.error?.slice(0, 60)}
+            <span className={`text-xs shrink-0 ${
+              p.ok ? 'text-green-600' : p.faltaItemizado ? 'text-amber-700' : 'text-red-600'
+            }`}>
+              {p.ok ? `${p.totalTandas} tandas`
+                : p.faltaItemizado ? 'sin itemizado · no lanzada'
+                : p.error?.slice(0, 60)}
             </span>
           </div>
         ))}
       </div>
+
+      {estado === 'listo' && sinItemizado.length > 0 && (
+        <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 space-y-2">
+          <div>
+            <span className="font-semibold">
+              {sinItemizado.length} estudiante(s) quedaron sin lanzar porque no se encontró
+              su itemizado
+            </span>{' '}
+            ({sinItemizado.map(([c]) => detectStudentName(c) || c).join(', ')}). Sin él no
+            se puede medir qué partidas tienen APU, que es lo que decide si aprueban el
+            ramo. Copia su itemizado —el de la Entrega 1 sirve, en Excel o en PDF— junto
+            al libro de APU y vuelve a cargar la carpeta.
+          </div>
+          <button
+            onClick={lanzarSinCruce}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium text-amber-900 bg-white border border-amber-300 hover:bg-amber-100"
+          >
+            Lanzarlas igual, sin medir la cobertura
+          </button>
+        </div>
+      )}
 
       {estado === 'listo' && (
         <div className="text-xs text-slate-600 leading-relaxed">
           Los lotes se procesan en paralelo, así que el curso completo tarda más o menos
           lo mismo que una sola revisión. Vuelve más tarde y recógelas desde la pantalla
           inicial — sobreviven a cerrar la aplicación.
-          {conError > 0 && (
+          {conError - sinItemizado.length > 0 && (
             <span className="block mt-1 text-red-600">
-              {conError} estudiante(s) no se pudieron lanzar. Revísalos de a uno.
+              {conError - sinItemizado.length} estudiante(s) no se pudieron lanzar.
+              Revísalos de a uno.
             </span>
           )}
         </div>
@@ -174,6 +253,17 @@ export default function LanzadorCurso({ carpetas, delivery, onListo, onCancelar 
 // Las imágenes sueltas no se leen aquí: la revisión por tandas no las recibe y
 // cargarlas solo gastaría memoria. Ver el aviso de arriba.
 const ES_IMAGEN = /\.(jpe?g|png|webp)$/i;
+
+/**
+ * ¿Se pudieron cruzar las cartillas contra el itemizado?
+ *
+ * El porcentaje solo se calcula cuando el cruce salió: si falta el itemizado, o
+ * ninguna cartilla se pudo emparejar con él, la comprobación informa el hecho y
+ * no deja porcentaje.
+ */
+function seCruzaConElItemizado(admissibility) {
+  return (admissibility?.results ?? []).find(r => r.id === 'apu')?.ratio !== undefined;
+}
 
 async function parsear(file) {
   const ext = file.name.split('.').pop().toLowerCase();

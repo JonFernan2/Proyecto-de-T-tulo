@@ -298,12 +298,18 @@ const EN_GASTOS_GENERALES_RE = /gastos\s+generales/i;
 const INCLUIDA_EN_OTRA_RE = /(considerad[oa]|inclu[íi]d[oa]|se\s+incluye|contemplad[oa])\s+(en|dentro)/i;
 
 /**
- * Las partidas del listado con su designación, para poder distinguirlas.
- * Devuelve [{ codigo, designacion, especialidad }].
+ * Marca cuáles de las partidas leídas son de especialidades, que no se
+ * desarrollan y por tanto no entran en el denominador de la cobertura.
+ *
+ * Vive aparte porque el itemizado llega en Excel o en PDF, y la regla es la
+ * misma en los dos casos: mientras solo la aplicaba el camino del Excel, a
+ * quien entregó su itemizado en PDF se le exigían cartillas de eléctricas y
+ * sanitarias y su cobertura salía más baja de lo que le corresponde.
+ *
+ * Recibe [{ codigo, designacion, fila }] y devuelve lo mismo con `especialidad`,
+ * ya sin la fila cruda.
  */
-export function extraerPartidasListado(excelData) {
-  const filas = extraerFilasListado(excelData);
-
+function marcarEspecialidades(filas) {
   // Si el itemizado marca sus especialidades, se hace caso a esa marca y solo a
   // ella. Las palabras clave son el último recurso, para los que no las marcan.
   const seMarcanSolas = filas.some(p => marcaEspecialidad(p.fila));
@@ -328,6 +334,14 @@ export function extraerPartidasListado(excelData) {
   }));
 }
 
+/**
+ * Las partidas del listado con su designación, para poder distinguirlas.
+ * Devuelve [{ codigo, designacion, especialidad }].
+ */
+export function extraerPartidasListado(excelData) {
+  return marcarEspecialidades(extraerFilasListado(excelData));
+}
+
 export function extraerItemsListado(excelData) {
   return extraerFilasListado(excelData).map(p => p.codigo);
 }
@@ -350,7 +364,12 @@ export function extraerPartidasDePdf(paginas) {
   const texto = (Array.isArray(paginas) ? paginas : [paginas]).join(' ')
     .replace(/\s+/g, ' ');
 
-  const codigos = [...texto.matchAll(/(?<![\d.,])\d{1,3}(?:[.,]\d{1,3}){1,6}(?![\d.,])/g)];
+  // Los espesores se descartan antes de recorrer, y no dentro del bucle: cada
+  // código marca dónde termina la designación del anterior, así que un «0.15»
+  // dejado en la lista cortaba la partida que lo contenía —«Radier de hormigón
+  // e=»— y la dejaba sin unidad, es decir, fuera del itemizado.
+  const codigos = [...texto.matchAll(/(?<![\d.,])\d{1,3}(?:[.,]\d{1,3}){1,6}(?![\d.,])/g)]
+    .filter(m => !esMedida(texto, m));
   const partidas = [];
   const vistos = new Set();
 
@@ -360,7 +379,7 @@ export function extraerPartidasDePdf(paginas) {
 
     const desde = codigos[i].index + codigos[i][0].length;
     const hasta = codigos[i + 1]?.index ?? texto.length;
-    const resto = texto.slice(desde, hasta).trim();
+    const resto = hastaSuUnidad(texto.slice(desde, hasta).trim());
 
     // Una partida termina en su unidad; un título de capítulo no la lleva.
     if (!resto || resto.length > 160) continue;
@@ -372,7 +391,38 @@ export function extraerPartidasDePdf(paginas) {
     partidas.push({ codigo, designacion: resto, fila: `${codigo} ${resto}` });
   }
 
-  return partidas;
+  return marcarEspecialidades(partidas);
+}
+
+/**
+ * Un número que es un espesor o una dimensión, no el código de una partida.
+ *
+ * El itemizado escribe los espesores dentro de la designación —«Piso de
+ * hormigón e=0.15 m», «Placa e=13.5 mm»— y al leer el PDF se parecen a un
+ * código. Se colaban como partidas inexistentes que nadie podía tener hechas, y
+ * de paso se comían la partida que los contenía —«3.5.4 Piso madera 13,5mm
+ * Carpenter» se perdía entera porque su designación quedaba cortada en «Piso
+ * madera», sin unidad—. A un estudiante le costó tres partidas.
+ *
+ * Tres señales bastan: ningún capítulo empieza en cero, un número precedido de
+ * «=» es una medida, y un código siempre lleva un espacio antes del nombre de
+ * la partida, mientras que la medida va pegada a su unidad («13,5mm»).
+ */
+function esMedida(texto, match) {
+  if (/^0[.,]/.test(match[0])) return true;
+  if (/=\s*$/.test(texto.slice(Math.max(0, match.index - 3), match.index))) return true;
+  return /[a-záéíóúñ]/i.test(texto[match.index + match[0].length] ?? '');
+}
+
+// La unidad cierra la designación. Lo que viene detrás es ya el título del
+// capítulo siguiente, que en el PDF queda pegado por falta de saltos de línea
+// —«Barandas ML 4 Pinturas»—. Arrastrarlo ensuciaba el informe y llegó a
+// marcar como especialidad una partida de arquitectura porque el capítulo
+// siguiente se llamaba «Ascensor».
+function hastaSuUnidad(resto) {
+  let fin = 0;
+  for (const m of resto.matchAll(UNIDAD_GLOBAL_RE)) fin = m.index + m[0].length;
+  return fin ? resto.slice(0, fin).trim() : resto;
 }
 
 function extraerFilasListado(excelData) {
@@ -410,6 +460,8 @@ const UNIDAD_RE = new RegExp(
   `(?<=^|${NO_LETRA})(m2|m²|ml|m3|m³|kg|un|u/n|c/u|ud|und|unid|gl|glb|pm|hr|hh|h|lts?|ton|jgo|pza|pzas|vj|set|saco|sg|m)(?=$|${NO_LETRA})`,
   'i',
 );
+// La misma unidad, para recorrer todas las apariciones de un texto.
+const UNIDAD_GLOBAL_RE = new RegExp(UNIDAD_RE.source, 'gi');
 const CABECERA_RE = /^(item|ítem|n[°º]|nro|partida|designaci[oó]n|descripci[oó]n|unidad|cantidad|total)/i;
 
 function buscarItems(hojas, exigirUnidad) {
