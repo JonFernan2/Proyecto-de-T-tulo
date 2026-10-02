@@ -95,7 +95,15 @@ export function construirFilesMap(entradas) {
 
     // Los PDF de respaldo traen proveedor, precio y año: se cotejan contra la
     // planilla. Se conserva de qué archivo viene cada página para poder citarlo.
-    respaldoPdfs: [...ofRole('respaldo'), ...ofRole('cotizaciones')]
+    //
+    // También se suman los que quedaron con rol «listado»: en la Entrega 2 no
+    // hay una opción de rol para «itemizado en PDF» —el desplegable solo
+    // ofrece «Listado / Itemizado E1», pensado para Excel— así que quien carga
+    // el itemizado como PDF termina eligiendo ese rol, el único que menciona
+    // «itemizado». `mergeExcel('listado')` lo descarta por no tener hojas, y
+    // sin esto el archivo desaparecía sin aviso: no llegaba ni al itemizado en
+    // Excel ni al cruce en PDF, aunque el docente sí lo hubiera cargado.
+    respaldoPdfs: [...ofRole('respaldo'), ...ofRole('cotizaciones'), ...ofRole('listado')]
       .filter(e => ext(e) === 'pdf' && e.parsed?.pages)
       .map(e => ({
         name: e.file.name,

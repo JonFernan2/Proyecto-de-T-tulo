@@ -17,7 +17,7 @@ const ROLE_OPTIONS_E1 = [
 
 const ROLE_OPTIONS_E2 = [
   { value: 'eett', label: 'EETT (Word / PDF)' },
-  { value: 'listado', label: 'Listado / Itemizado E1' },
+  { value: 'listado', label: 'Listado / Itemizado E1 (Excel o PDF)' },
   { value: 'cubicaciones', label: 'Cubicaciones E1' },
   { value: 'cotizaciones', label: 'Cotizaciones E1' },
   { value: 'apu', label: 'APU — Cartillas (Anexo 01)' },
