@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 import mammoth from 'mammoth';
 import JSZip from 'jszip';
 import { extraerImagenesIncrustadas } from './xlsxImages.js';
+import { extraerCuadrosDeTexto } from './xlsxTextboxes.js';
 import * as pdfjsLib from 'pdfjs-dist';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
@@ -23,6 +24,12 @@ export async function parseExcel(file) {
   // dejan el respaldo: capturas de AutoCAD con el área medida. Ese número es el
   // que debe coincidir con el total de la hoja.
   const imagenesPorHoja = await extraerImagenesIncrustadas(arrayBuffer);
+
+  // Tampoco ve los cuadros de texto, y algunos estudiantes redactan ahí el
+  // método constructivo en vez de escribirlo en la celda bajo «MÉTODO DE
+  // TRABAJO»: sin esto esa cartilla se revisaba como si el método estuviera
+  // en blanco, cuando en realidad era invisible para la revisión.
+  const textosPorHoja = await extraerCuadrosDeTexto(arrayBuffer);
 
   const sheets = wb.SheetNames.map(name => {
     const ws = wb.Sheets[name];
@@ -46,12 +53,22 @@ export async function parseExcel(file) {
       rows.push(row);
     }
 
+    // Se agrega como una fila más, con una marca que avisa que no es una
+    // celda: así llega a todo lo que ya recorre `rows` —la revisión con
+    // Claude, el cruce con el itemizado— sin que cada uno tenga que aprender
+    // a mirar también los dibujos.
+    const textoCuadros = textosPorHoja[name];
+    if (textoCuadros) {
+      rows.push([{ value: `[CUADRO DE TEXTO] ${textoCuadros}`, formula: null, type: 's' }]);
+    }
+
     return {
       name,
       rows,
       totalRows: range.e.r - range.s.r + 1,
       images: imagenesPorHoja[name] ?? [],
       embeddedImages: (imagenesPorHoja[name] ?? []).length,
+      textoCuadros: textoCuadros ?? null,
     };
   });
 
