@@ -8,8 +8,9 @@ export const UMBRAL_COTIZACIONES = 0.5;
 // estudiante no aprueba el ramo.
 export const APU_ESPERADO = 1.0;
 export const APU_MINIMO_APROBACION = 0.8;
-// Nota máxima cuando el APU no alcanza ese 80%.
-export const NOTA_APU_INSUFICIENTE = 3.5;
+// Nota máxima cuando el APU no alcanza ese 80%: la más alta que reprueba, dado
+// que se aprueba con 4,0.
+export const NOTA_APU_INSUFICIENTE = 3.9;
 
 /**
  * Run admissibility checks for E1 or E2.

@@ -1080,7 +1080,7 @@ EN ESTA ENTREGA NO SE FILTRA POR ADMISIBILIDAD: todas las entregas se evalúan.
 COBERTURA DEL APU — se espera que TODAS las partidas del itemizado tengan su
 cartilla (100%), aunque no es obligatorio alcanzarlo. Lo que sí es terminante:
 con menos del 80% de las partidas con APU el estudiante NO APRUEBA el ramo, y
-la nota final queda topada en 3,5 por bien resueltas que estén las cartillas
+la nota final queda topada en 3,9 por bien resueltas que estén las cartillas
 entregadas. El porcentaje ya viene calculado en los hechos verificados, con las
 partidas que quedaron sin APU nombradas una por una: úsalo tal cual y cítalas.
 
