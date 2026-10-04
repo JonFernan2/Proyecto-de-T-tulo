@@ -295,7 +295,7 @@ const EN_GASTOS_GENERALES_RE = /gastos\s+generales/i;
 // permite expresamente fusionar actividades, y el itemizado lo deja escrito:
 // «Considerado en ítem 3.4.6», «Se incluye en…». Exigirle cartilla sería
 // reprochar precisamente lo que la pauta recomienda.
-const INCLUIDA_EN_OTRA_RE = /(considerad[oa]|inclu[íi]d[oa]|se\s+incluye|contemplad[oa])\s+(en|dentro)/i;
+const INCLUIDA_EN_OTRA_RE = /(considerad[oa]|inclu[íi]d[oa]|se\s+incluye|contemplad[oa]|valoriza(r|do|da)?)\s+(en|dentro)/i;
 
 /**
  * Marca cuáles de las partidas leídas son de especialidades, que no se
@@ -309,11 +309,21 @@ const INCLUIDA_EN_OTRA_RE = /(considerad[oa]|inclu[íi]d[oa]|se\s+incluye|contem
  * Recibe [{ codigo, designacion, fila }] y devuelve lo mismo con `especialidad`,
  * ya sin la fila cruda.
  */
-function marcarEspecialidades(filas) {
+function marcarEspecialidades(filas, capitulosTitulados = new Set()) {
+  // Un capítulo que el itemizado titula «Especialidades» lo es entero, sin
+  // importar cómo se llame cada partida: «Excavaciones» o «Cámaras» dentro de
+  // él son del alcantarillado, no de la obra gruesa.
+  const enCapituloTitulado = p =>
+    [...capitulosTitulados].some(c => p.codigo === c || p.codigo.startsWith(`${c}.`));
+
   // Si el itemizado marca sus especialidades, se hace caso a esa marca y solo a
   // ella. Las palabras clave son el último recurso, para los que no las marcan.
+  // Un capítulo titulado también cuenta como marca del itemizado: si existe,
+  // adivinar por palabra clave fuera de él solo agrega falsos positivos
+  // —«Celosías de ventilación», «Mueble soporte encimera eléctrica»—.
   const seMarcanSolas = filas.some(p => marcaEspecialidad(p.fila));
-  const esEsp = p => (seMarcanSolas ? marcaEspecialidad(p.fila) : esEspecialidad(p.designacion));
+  const adivinar = !seMarcanSolas && capitulosTitulados.size === 0;
+  const esEsp = p => (adivinar ? esEspecialidad(p.designacion) : marcaEspecialidad(p.fila));
 
   // Las especialidades van agrupadas en su propio capítulo: si el itemizado
   // marca alguna partida de un capítulo, el capítulo entero es de
@@ -330,8 +340,33 @@ function marcarEspecialidades(filas) {
 
   return filas.map(({ fila, ...p }) => ({
     ...p,
-    especialidad: capitulos ? capitulos.has(p.codigo.split('.')[0]) : esEsp({ fila, ...p }),
+    especialidad: enCapituloTitulado(p)
+      || (capitulos ? capitulos.has(p.codigo.split('.')[0]) : esEsp({ fila, ...p })),
   }));
+}
+
+// «22 ESPECIALIDADES», «ESPECIFICACIONES TÉCNICAS DE ESPECIALIDADES».
+const TITULO_ESPECIALIDADES_RE = /^(especificaciones\s+t[eé]cnicas\s+de\s+)?especialidades\.?$/i;
+
+/**
+ * Los códigos de capítulo que el itemizado titula como especialidades.
+ *
+ * El título no lleva unidad, así que no llega a la lista de partidas y hay que
+ * buscarlo aparte. Sin esto, en un itemizado con un capítulo «22
+ * ESPECIALIDADES» de 102 partidas solo se reconocían 27 por palabra clave, y
+ * se exigían cartillas de excavación de alcantarillado o de equipos de bombeo.
+ */
+function capitulosDeEspecialidad(hojas) {
+  const prefijos = new Set();
+  for (const hoja of hojas) {
+    for (const row of hoja.rows ?? []) {
+      const celdas = (row ?? []).map(c => String(c?.value ?? '').trim()).filter(Boolean);
+      if (!celdas.some(v => TITULO_ESPECIALIDADES_RE.test(v))) continue;
+      const codigo = celdas.slice(0, 3).map(codigoCanonico).find(Boolean);
+      if (codigo) prefijos.add(codigo);
+    }
+  }
+  return prefijos;
 }
 
 /**
@@ -339,7 +374,8 @@ function marcarEspecialidades(filas) {
  * Devuelve [{ codigo, designacion, especialidad }].
  */
 export function extraerPartidasListado(excelData) {
-  return marcarEspecialidades(extraerFilasListado(excelData));
+  const hojas = hojasDeListado(excelData);
+  return marcarEspecialidades(filasDeListado(hojas), capitulosDeEspecialidad(hojas));
 }
 
 export function extraerItemsListado(excelData) {
@@ -433,6 +469,10 @@ function hastaSuUnidad(resto) {
 }
 
 function extraerFilasListado(excelData) {
+  return filasDeListado(hojasDeListado(excelData));
+}
+
+function hojasDeListado(excelData) {
   if (!excelData?.sheets?.length) return [];
 
   // Se prefiere una hoja que se llame listado/itemizado. Si ninguna lo dice
@@ -447,16 +487,28 @@ function extraerFilasListado(excelData) {
   // libro sin itemizado se acababa leyendo la planilla de sueldos como si lo
   // fuera: partidas inventadas y una cobertura del 7% que habría reprobado a
   // quien tenía casi todo hecho.
-  const hojas = porNombre.length
+  return porNombre.length
     ? porNombre
     : excelData.sheets.filter(s => !pareceCartillaApu(s) && pareceItemizado(s));
+}
 
+function filasDeListado(hojas) {
   // Dos pasadas: primero exigiendo que la fila mida algo —unidad o cantidad—,
   // que es lo propio de una partida y deja fuera los títulos de capítulo; si
   // así no sale nada, basta con que describa algo. Las unidades se escriben de
   // mil maneras («UD», «C/U», «M.L.», «N°») y perseguirlas una por una dejaba
   // partidas sin contar: un itemizado real perdía seis de sus cuarenta filas.
-  return buscarItems(hojas, true) ?? buscarItems(hojas, false) ?? [];
+  const filas = buscarItems(hojas, true) ?? buscarItems(hojas, false) ?? [];
+
+  // Una fila sin columna de unidad que tiene subpartidas es un título: el costo
+  // lo llevan sus hijas. «14.3 Puerta Metálicas - PM» se colaba porque «PM»
+  // parece unidad, y se exigía una cartilla para el título además de las
+  // siete de sus tipos. Si trae su propia unidad se respeta: «16.6 Mortero
+  // afinado m2» es partida aunque el itemizado numere mal una hija «16.6.2».
+  const codigos = filas.map(p => p.codigo);
+  return filas
+    .filter(p => p.conUnidad || !codigos.some(c => c.startsWith(`${p.codigo}.`)))
+    .map(({ conUnidad, ...p }) => p);
 }
 
 // El borde \b de JavaScript no considera letra a las vocales acentuadas, así
@@ -469,6 +521,8 @@ const UNIDAD_RE = new RegExp(
 );
 // La misma unidad, para recorrer todas las apariciones de un texto.
 const UNIDAD_GLOBAL_RE = new RegExp(UNIDAD_RE.source, 'gi');
+// Una celda que no trae más que la unidad.
+const UNIDAD_SOLA_RE = /^(m2|m²|ml|m\.l\.|m3|m³|kg|un|u\/n|c\/u|ud|und|unid|gl|glb|pm|hr|hh|h|lts?|ton|jgo|pza|pzas|vj|set|saco|sg|m)\.?$/i;
 const CABECERA_RE = /^(item|ítem|n[°º]|nro|partida|designaci[oó]n|descripci[oó]n|unidad|cantidad|total)/i;
 
 function buscarItems(hojas, exigirUnidad) {
@@ -508,7 +562,15 @@ function buscarItems(hojas, exigirUnidad) {
         if (!UNIDAD_RE.test(texto) && !tieneCantidad) continue;
       }
       // Una partida tiene designación: sin texto es una fila de números sueltos.
-      if (!/[a-záéíóúñ]{4}/i.test(texto)) continue;
+      // Basta una celda con alguna letra que no sea solo la unidad: las
+      // ventanas, puertas y marcos se nombran por su tipo —«VE 60», «P-70»,
+      // «Pm 115»— y exigir cuatro letras seguidas dejaba fuera del itemizado
+      // capítulos enteros de carpintería.
+      // Si dos celdas parecen unidad, una es el nombre: la manilla tipo «M2»
+      // medida en «un».
+      const otras = celdas.filter((v, i) => i !== elegido.i && /[a-záéíóúñ]/i.test(v));
+      const tieneNombre = otras.some(v => !UNIDAD_SOLA_RE.test(v)) || otras.length >= 2;
+      if (!tieneNombre) continue;
 
       // La designación es lo que queda de la fila sin el código ni los números:
       // es lo que permite reconocer una especialidad.
@@ -520,7 +582,8 @@ function buscarItems(hojas, exigirUnidad) {
       vistos.add(codigo);
       // La fila entera se conserva para poder leer las marcas que el propio
       // itemizado pone («ver detalle en especialidad correspondiente»).
-      partidas.push({ codigo, designacion, fila: texto });
+      const conUnidad = celdas.some((v, i) => i !== elegido.i && UNIDAD_SOLA_RE.test(v));
+      partidas.push({ codigo, designacion, fila: texto, conUnidad });
     }
   }
 
