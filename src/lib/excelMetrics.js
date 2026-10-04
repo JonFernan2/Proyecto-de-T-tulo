@@ -384,7 +384,14 @@ export function extraerPartidasDePdf(paginas) {
     // Una partida termina en su unidad; un título de capítulo no la lleva.
     if (!resto || resto.length > 160) continue;
     if (!UNIDAD_RE.test(resto)) continue;
-    if (!/[a-záéíóúñ]{4}/i.test(resto)) continue;
+    // Antes se exigían 4 letras seguidas, pensado para descartar números
+    // sueltos que la unidad hubiera emparejado por error. Pero un itemizado
+    // de carpintería nombra sus partidas con el código del tipo, no con una
+    // descripción: «T-1», «P-3», «V-1». Esas tienen una sola letra y quedaban
+    // fuera —un bloque entero de 49 puertas y ventanas desaparecía del
+    // itemizado—. Basta con exigir alguna letra: lo puramente numérico ya
+    // queda filtrado porque sin letra no hay unidad que emparejar.
+    if (!/[a-záéíóúñ]/i.test(resto)) continue;
     if (esGastoGeneral(resto) || INCLUIDA_EN_OTRA_RE.test(resto)) continue;
 
     vistos.add(codigo);
