@@ -291,6 +291,17 @@ function checkApu(filesMap) {
             + ` la pauta pide el número y el nombre de la partida en su detalle superior.`;
   }
 
+  // Una cartilla cuenta si trae mano de obra costeada y, además, rendimiento o
+  // alguna sección con contenido. Las plantillas vacías se nombran para que el
+  // docente sepa que se vieron y por qué no suman.
+  if (m.plantillasVacias?.length) {
+    const muestra = m.plantillasVacias.slice(0, 6).join(', ');
+    const resto = m.plantillasVacias.length - 6;
+    detail += ` ${m.plantillasVacias.length} hoja(s) traen la plantilla de cartilla sin`
+            + ` desarrollar —sin mano de obra costeada, o con ella pero sin rendimiento ni`
+            + ` materiales, fletes o equipos— y no cuentan (${muestra}${resto > 0 ? ` y ${resto} más` : ''}).`;
+  }
+
   if (m.ratio < APU_ESPERADO) detail += ' La pauta espera el 100%.';
 
   return {

@@ -672,6 +672,97 @@ const MARCAS_APU = [
   /rendimiento/i,
 ];
 
+function nuevaCartilla() {
+  return { conRotulo: false, codigos: new Set(), nombres: [], actividades: [], filas: [] };
+}
+
+// «ACTIVIDAD: Limpieza y escarpe», también dentro de un cuadro de texto donde
+// el siguiente rótulo viene pegado: «ACTIVIDAD: Letrero de obraMETODOLOGIA…».
+const ACTIVIDAD_RE = /ACTIVIDAD\s*:\s*(.+?)(?=\s*(?:METODOLOG|M[ÉE]TODO|CUADRILLA|ETAPA|$))/gi;
+
+// Dónde empieza cada sección de la cartilla. Lo que viene después de
+// observaciones —herramientas, método— no es costo.
+const SECCIONES_CARTILLA = [
+  [/^mano\s+de\s+obra/i, 'mo'],
+  [/^materiales\b/i, 'otra'],
+  [/^fletes?\b/i, 'otra'],
+  [/^(equipos?|maquinarias?)\b/i, 'otra'],
+  [/^(observaciones|listado\s+de\s+herramientas|herramientas|descripci[oó]n\s+m[eé]todo|m[eé]todo\s+de\s+trabajo|total\s+costo\s+directo)/i, 'fin'],
+];
+
+// Rótulos y totales de la plantilla, que no son un trabajador ni un material.
+const ROTULO_CARTILLA_RE = /^(cuadrilla|cant|co\w{0,2}to|total|parcial|leyes|designaci|detalle|unidad|cantidad|valor|rendimiento|sub\s*contra|materiales|fletes?|equipos?|maquinarias?|mano\s+de\s+obra|desgaste|herramientas|observaciones|imprevistos|gastos|utilidad|precio|incid)/i;
+
+// La cartilla ocupa las primeras diez columnas. Más a la derecha algunos
+// estudiantes ponen su planilla de sueldos, cuyos montos no son de la cartilla.
+const COLUMNAS_CARTILLA = 10;
+
+/**
+ * ¿Está desarrollada esta cartilla?
+ *
+ * Se exige mano de obra costeada —al menos un trabajador con su costo día— y,
+ * además, el rendimiento calculado o alguna sección con contenido: materiales,
+ * fletes o equipos. No se piden las cinco llenas porque no todas aplican
+ * siempre: una excavación manual lleva cuadrilla y herramientas, sin
+ * materiales ni equipos, y sin materiales no hay flete. Las herramientas no
+ * cuentan: la pauta pide identificarlas, no valorizarlas, y un listado de
+ * herramientas no prueba que la partida se haya costeado.
+ *
+ * El encabezado —código, N° de hoja, fecha— no se mira: olvidarlo es un
+ * reparo de forma, no prueba de que el APU no se hizo.
+ */
+function cartillaDesarrollada(filas) {
+  let seccion = null;
+  let manoDeObra = false;
+  let rendimiento = false;
+  let otra = false;
+
+  for (const row of filas) {
+    const celdas = (row ?? []).slice(0, COLUMNAS_CARTILLA).map(c => String(c?.value ?? '').trim());
+    const numeros = (row ?? []).slice(0, COLUMNAS_CARTILLA).map(numeroDeCelda);
+
+    // «RENDIMIENTO CUADRILLA (A)» va en la fila de la mano de obra; sin él, el
+    // parcial da #DIV/0!.
+    if (seccion !== 'otra' && celdas.some(v => /rendimiento/i.test(v)) && numeros.some(n => n > 0)) {
+      rendimiento = true;
+    }
+
+    const inicio = SECCIONES_CARTILLA.find(([re]) => celdas.some(v => re.test(v)));
+    if (inicio) {
+      seccion = inicio[1];
+      if (seccion === 'fin') break;
+      continue;
+    }
+    if (!seccion) continue;
+
+    // Una línea de la cartilla: un nombre en las primeras columnas y, para la
+    // mano de obra, su costo día al lado.
+    const iNombre = celdas.findIndex((v, i) =>
+      i < 4 && /[a-záéíóúñ]{3}/i.test(v) && !ROTULO_CARTILLA_RE.test(v));
+    if (iNombre < 0) continue;
+
+    if (seccion === 'mo') {
+      if (numeros.some((n, i) => i !== iNombre && n >= 1000)) manoDeObra = true;
+    } else {
+      otra = true;
+    }
+  }
+  return manoDeObra && (rendimiento || otra);
+}
+
+/** El número de una celda formateada: «$ 47,727», «$47.727», «31.82», «0.000666». */
+function numeroDeCelda(celda) {
+  const crudo = String(celda?.value ?? '');
+  // «(M3/DIA», «#DIV/0!», «e=0.15»: con letras no es un monto.
+  if (/[a-záéíóúñ#=/]/i.test(crudo)) return NaN;
+  const s = crudo.replace(/[^\d.,-]/g, '');
+  if (!/\d/.test(s)) return NaN;
+  const ultimo = Math.max(s.lastIndexOf(','), s.lastIndexOf('.'));
+  // El último separador es decimal salvo que le sigan exactamente tres dígitos.
+  if (ultimo < 0 || s.length - ultimo - 1 === 3) return parseFloat(s.replace(/[.,]/g, ''));
+  return parseFloat(`${s.slice(0, ultimo).replace(/[.,]/g, '')}.${s.slice(ultimo + 1)}`);
+}
+
 /**
  * Cuenta las cartillas APU y las cruza contra el itemizado.
  *
@@ -703,18 +794,24 @@ export function medirApu(apuData, itemsListado = []) {
   const nombresEnApu = [];
   const identidades = [];
 
+  // Hojas con la plantilla de cartilla pero sin nada desarrollado.
+  const plantillasVacias = [];
+
   for (const hoja of apuData.sheets) {
     const filas = hoja.rows ?? [];
     const conteos = MARCAS_APU.map(() => 0);
     // La mayoría de los libros nombran cada hoja con el código de su partida
     // («1.1.1.1», «A.1», «1,3,1», «1-2.1.1»). Es la pista más fiable que hay.
-    const codigosDeLaHoja = new Set();
     const codigoDelNombre = codigoCanonico(hoja.name);
-    if (codigoDelNombre) codigosDeLaHoja.add(codigoDelNombre);
-
     // Y los que no, ponen el nombre de la partida en la hoja y en su título
     // («APU_01 LETRERO DE OBRA»).
-    const nombresDeLaHoja = [normalizar(hoja.name.replace(/^apu[\s._-]*\d*/i, ''))];
+    const nombreDeLaPestana = normalizar(hoja.name.replace(/^apu[\s._-]*\d*/i, ''));
+
+    // Una hoja puede traer varias cartillas, y cada una empieza en su rótulo
+    // «PARTIDA - ACTIVIDAD». Se separan para juzgar cada cartilla por lo que
+    // trae ella, no por lo que trae la vecina.
+    const cartillas = [];
+    let actual = nuevaCartilla();
 
     for (const row of filas) {
       const celdas = (row ?? []).map(c => String(c?.value ?? '').trim());
@@ -726,26 +823,48 @@ export function medirApu(apuData, itemsListado = []) {
       // Solo se lee el código junto a su rótulo. Rastrearlo por todas las
       // celdas recogía cantidades —«1.00», «472.78» tienen forma de código— y
       // daba por analizadas partidas que nadie había desarrollado.
-      const iRotulo = celdas.findIndex(v =>
-        /^(partida|[ií]tem)\b/i.test(v) || /partida\s*[-–]\s*actividad/i.test(v));
-      if (iRotulo < 0) continue;
+      // Solo en las primeras columnas, que es donde va el cuerpo de la
+      // cartilla: hay plantillas con una tabla de sueldos a la derecha cuya
+      // columna «ITEM» partía la cartilla en pedazos sin mano de obra.
+      const iRotulo = celdas.findIndex((v, i) => i < 4 && (
+        /^(partida|[ií]tem)\b/i.test(v) || /partida\s*[-–]\s*actividad/i.test(v)));
+      if (iRotulo >= 0) {
+        if (actual.conRotulo) { cartillas.push(actual); actual = nuevaCartilla(); }
+        actual.conRotulo = true;
 
-      for (const v of celdas.slice(iRotulo + 1, iRotulo + 4)) {
-        const c = codigoCanonico(v);
-        if (c) { codigosDeLaHoja.add(c); continue; }
+        for (const v of celdas.slice(iRotulo + 1, iRotulo + 4)) {
+          // Una celda sin letras es un código entero, aunque traiga espacios:
+          // «1, 3, 1».
+          const entero = /[a-záéíóúñ]/i.test(v) ? null : codigoCanonico(v);
+          if (entero) { actual.codigos.add(entero); continue; }
 
-        // La pauta pide el número y el nombre juntos, y así llegan: «6.1 PVC PN
-        // 10 63 MM». La celda entera no es un código, pero empieza por uno.
-        const [inicio, ...resto] = v.split(/\s+/);
-        const cPrefijo = codigoCanonico(inicio);
-        if (cPrefijo && resto.length) {
-          codigosDeLaHoja.add(cPrefijo);
-          nombresDeLaHoja.push(normalizar(resto.join(' ')));
-        } else if (v.length > 3 && /[a-záéíóúñ]{3}/i.test(v)) {
-          nombresDeLaHoja.push(normalizar(v));
+          // La pauta pide el número y el nombre juntos, y así llegan: «6.1 PVC
+          // PN 10 63 MM». Con letras se prueba primero el inicio: leída entera,
+          // «3.2.1.1 T-1» pasaba por un código inexistente «3.2.1.1.T.1».
+          const [inicio, ...resto] = v.split(/\s+/);
+          const cPrefijo = codigoCanonico(inicio);
+          if (cPrefijo && resto.length) {
+            actual.codigos.add(cPrefijo);
+            actual.nombres.push(normalizar(resto.join(' ')));
+            continue;
+          }
+          const c = codigoCanonico(v);
+          if (c) actual.codigos.add(c);
+          else if (v.length > 3 && /[a-záéíóúñ]{3}/i.test(v)) actual.nombres.push(normalizar(v));
         }
       }
+
+      // «ACTIVIDAD: …» encabeza el método constructivo. Si el estudiante no
+      // llenó el rótulo de la cartilla, es lo único que dice qué analiza.
+      for (const v of celdas) {
+        for (const m of v.matchAll(ACTIVIDAD_RE)) {
+          if (/[a-záéíóúñ]{3}/i.test(m[1])) actual.actividades.push(normalizar(m[1]));
+        }
+      }
+
+      actual.filas.push(row);
     }
+    cartillas.push(actual);
 
     // Una hoja es de cartillas solo si trae DOS secciones distintas. Con una
     // bastaba, y el itemizado —que suele nombrar «materiales» en algún capítulo
@@ -765,17 +884,42 @@ export function medirApu(apuData, itemsListado = []) {
 
     porHoja.push({ hoja: hoja.name, apus: bloques });
 
+    // Una cartilla cuenta por lo que trae desarrollado, no por su encabezado:
+    // una plantilla con el código bien puesto y las secciones vacías no
+    // analiza nada, y una cartilla completa a la que el estudiante le olvidó
+    // poner el código sí. Ver cartillaDesarrollada().
+    const desarrolladas = cartillas.filter(c => cartillaDesarrollada(c.filas));
+    if (!desarrolladas.length) { plantillasVacias.push(hoja.name); continue; }
+
     // Los números de partida solo cuentan si vienen de una hoja que de verdad
     // trae cartillas. El itemizado suele ir dentro del mismo libro, y tomar sus
     // códigos daría por analizada toda partida listada: cobertura del 100% para
     // quien hizo la mitad.
-    for (const c of codigosDeLaHoja) codigosEnApu.add(c);
-    const palabras = nombresDeLaHoja.map(palabrasDePartida).filter(p => p.length);
-    for (const pal of palabras) nombresEnApu.push(pal);
+    //
+    // El nombre de la pestaña identifica la hoja entera; si la hoja tiene una
+    // sola cartilla, la identifica a ella.
+    const pestana = {
+      codigos: codigoDelNombre ? [codigoDelNombre] : [],
+      nombres: nombreDeLaPestana ? [nombreDeLaPestana] : [],
+    };
+    for (const c of pestana.codigos) codigosEnApu.add(c);
 
-    // La pauta exige que cada cartilla lleve arriba el número y el nombre de su
-    // partida. Se anota cuáles no lo traen, para poder observarlo.
-    identidades.push({ hoja: hoja.name, codigos: [...codigosDeLaHoja], palabras });
+    for (const c of desarrolladas) {
+      const codigos = [...c.codigos, ...(cartillas.length === 1 ? pestana.codigos : [])];
+      const nombres = [...c.nombres, ...(cartillas.length === 1 ? pestana.nombres : [])];
+      // El «ACTIVIDAD:» del método se usa solo si no hay otra identificación:
+      // a veces se copia de otra cartilla sin corregirlo, y como primera fuente
+      // daría por analizadas partidas ajenas.
+      if (!codigos.length && !c.nombres.length) nombres.push(...c.actividades);
+
+      for (const cod of codigos) codigosEnApu.add(cod);
+      const palabras = nombres.map(palabrasDePartida).filter(p => p.length);
+      for (const pal of palabras) nombresEnApu.push(pal);
+
+      // La pauta exige que cada cartilla lleve arriba el número y el nombre de
+      // su partida. Se anota cuáles no lo traen, para poder observarlo.
+      identidades.push({ hoja: hoja.name, codigos, palabras });
+    }
   }
 
   const apus = porHoja.reduce((s, h) => s + h.apus, 0);
@@ -839,10 +983,12 @@ export function medirApu(apuData, itemsListado = []) {
     itemsSinApu,
     // Cartillas que no dicen a qué partida del itemizado corresponden. La pauta
     // exige el número y el nombre en el detalle superior de cada una.
-    cartillasSinIdentificar: identidades
+    cartillasSinIdentificar: [...new Set(identidades
       .filter(id => !id.codigos.some(c => codigosDelListado.has(c))
                  && !id.palabras.some(pal => partidas.some(p => coincidePorNombre(p.designacion, [pal]))))
-      .map(id => id.hoja),
+      .map(id => id.hoja))],
+    // Hojas con la plantilla de cartilla y nada desarrollado: no cuentan.
+    plantillasVacias,
     // El desglose del denominador, para poder explicarlo en el informe.
     totalPartidas: partidas.length,
     exigibles: exigibles.length,
