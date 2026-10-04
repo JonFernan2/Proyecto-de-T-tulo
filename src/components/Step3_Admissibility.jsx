@@ -36,7 +36,6 @@ export default function Step3_Admissibility() {
 
   const { passed, results, aplicaAdmisibilidad = true } = admissibility;
   const bajoUmbral = results.filter(r => r.cumpleUmbral === false);
-  const reprobatorio = results.find(r => r.reprueba);
 
   function exportRejectionPDF() {
     const { getFilesMap } = useGradingStore.getState();
@@ -100,25 +99,18 @@ export default function Step3_Admissibility() {
       </div>
 
       {/* En la Entrega 2 no se filtra por admisibilidad: todas entran a
-          evaluación. Lo que sí decide aprobar o no es la cobertura del APU. */}
+          evaluación, y la cobertura del APU se informa sin mínimo. */}
       {!aplicaAdmisibilidad ? (
-        <div className={`rounded-xl p-4 border-2 ${reprobatorio ? 'bg-red-50 border-red-400' : 'bg-green-50 border-green-400'}`}>
+        <div className="rounded-xl p-4 border-2 bg-green-50 border-green-400">
           <div className="flex items-start gap-3">
-            <span className="text-3xl">{reprobatorio ? '⚠️' : '✅'}</span>
+            <span className="text-3xl">✅</span>
             <div>
-              <div className={`text-lg font-bold ${reprobatorio ? 'text-red-700' : 'text-green-700'}`}>
-                {reprobatorio ? 'Bajo el 80% de APU — no aprueba el ramo' : 'Entrega en evaluación'}
-              </div>
+              <div className="text-lg font-bold text-green-700">Entrega en evaluación</div>
               <div className="text-sm text-slate-600 mt-0.5">
                 En esta entrega no se filtra por admisibilidad: todas pasan a evaluación.
                 Lo que se verifica aquí es cuántas partidas del itemizado tienen su cartilla
-                APU — se espera el 100%, y bajo el 80% no se aprueba el ramo.
+                APU — se espera el 100%.
               </div>
-              {reprobatorio && (
-                <div className="text-sm text-red-700 font-medium mt-2">
-                  {reprobatorio.detail}
-                </div>
-              )}
             </div>
           </div>
         </div>
@@ -166,11 +158,15 @@ export default function Step3_Admissibility() {
                   <span className={r.cumpleUmbral === false ? 'text-red-600 font-semibold' : 'text-slate-500'}>
                     {Math.round(r.ratio * 100)}% alcanzado
                   </span>
-                  <span className="text-slate-500">mínimo {Math.round(r.threshold * 100)}%</span>
+                  <span className="text-slate-500">
+                    {r.id === 'apu' ? 'se espera' : 'mínimo'} {Math.round(r.threshold * 100)}%
+                  </span>
                 </div>
                 <div className="w-full bg-slate-200 rounded-full h-2">
                   <div
-                    className={`h-2 rounded-full ${r.cumpleUmbral === false ? 'bg-red-400' : 'bg-green-500'}`}
+                    className={`h-2 rounded-full ${
+                      r.cumpleUmbral === false ? 'bg-red-400' : r.ratio < r.threshold ? 'bg-amber-400' : 'bg-green-500'
+                    }`}
                     style={{ width: `${Math.min(100, r.ratio * 100)}%` }}
                   />
                 </div>

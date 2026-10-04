@@ -3,14 +3,10 @@ import { countListadoItems, medirCotizaciones, extraerPartidasListado, extraerPa
 // Umbral mínimo exigido para cubicaciones y cotizaciones (pauta: 50%).
 export const UMBRAL_CUBICACIONES = 0.5;
 export const UMBRAL_COTIZACIONES = 0.5;
-// El APU se espera completo —una cartilla por cada partida del itemizado— pero
-// no es obligatorio llegar al 100%. Lo que sí es terminante: bajo el 80% el
-// estudiante no aprueba el ramo.
+// El APU se espera completo —una cartilla por cada partida del itemizado—. La
+// cobertura se informa, pero no tiene mínimo ni topa la nota: lo que falta se
+// califica en los criterios.
 export const APU_ESPERADO = 1.0;
-export const APU_MINIMO_APROBACION = 0.8;
-// Nota máxima cuando el APU no alcanza ese 80%: la más alta que reprueba, dado
-// que se aprueba con 4,0.
-export const NOTA_APU_INSUFICIENTE = 3.9;
 
 /**
  * Run admissibility checks for E1 or E2.
@@ -295,26 +291,14 @@ function checkApu(filesMap) {
             + ` la pauta pide el número y el nombre de la partida en su detalle superior.`;
   }
 
-  // Bajo el 80% de las partidas con APU el estudiante no aprueba el ramo. Se
-  // deja dicho aquí para que lo vea el docente, lo lea la revisión y tope la
-  // nota final.
-  const reprueba = m.ratio < APU_MINIMO_APROBACION;
-  if (reprueba) {
-    detail += ` Bajo el 80% exigido para aprobar el ramo (${pct(APU_MINIMO_APROBACION)}).`;
-  } else if (m.ratio < APU_ESPERADO) {
-    detail += ` Sobre el 80% exigido, aunque la pauta espera el 100%.`;
-  }
+  if (m.ratio < APU_ESPERADO) detail += ' La pauta espera el 100%.';
 
   return {
     ...base,
     passed: true,                       // el archivo está; la cobertura es nota, no admisibilidad
     detail,
     ratio: m.ratio,
-    threshold: APU_MINIMO_APROBACION,
-    cumpleUmbral: !reprueba,
-    reprueba,
-    // Con menos del 80% la nota queda topada, aunque los criterios den más.
-    ...(reprueba ? { notaMaxima: NOTA_APU_INSUFICIENTE } : {}),
+    threshold: APU_ESPERADO,
   };
 }
 

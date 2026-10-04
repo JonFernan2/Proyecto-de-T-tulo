@@ -715,10 +715,10 @@ Evaluación cruzada que debes hacer:
 
 ${delivery === 'E2' ? `EXIGENCIA DE COBERTURA (Entrega 2):
 Esta entrega NO se filtra por admisibilidad: se evalúan todas.
-Se espera que todas las partidas del itemizado tengan su cartilla APU (100%),
-sin que sea obligatorio alcanzarlo. Con menos del 80% el estudiante NO APRUEBA
-el ramo. El porcentaje real y las partidas sin cartilla vienen calculados en los
-hechos verificados: úsalos tal cual y nómbralas.
+Se espera que todas las partidas del itemizado tengan su cartilla APU (100%).
+No hay un mínimo de cobertura ni un tope de nota: las partidas sin cartilla se
+califican en los criterios. El porcentaje real y las partidas sin cartilla
+vienen calculados en los hechos verificados: úsalos tal cual y nómbralas.
 Los pesos de cada criterio se mantienen sin alteración.` : `EXIGENCIA DE COBERTURA (pauta vigente):
 Cubicaciones y cotizaciones exigen un mínimo del 50% de las actividades del
 listado. El porcentaje real viene calculado en los hechos verificados:
@@ -1078,11 +1078,11 @@ especificar proveedor, espesor, formato y tipo concretos).
 EN ESTA ENTREGA NO SE FILTRA POR ADMISIBILIDAD: todas las entregas se evalúan.
 
 COBERTURA DEL APU — se espera que TODAS las partidas del itemizado tengan su
-cartilla (100%), aunque no es obligatorio alcanzarlo. Lo que sí es terminante:
-con menos del 80% de las partidas con APU el estudiante NO APRUEBA el ramo, y
-la nota final queda topada en 3,9 por bien resueltas que estén las cartillas
-entregadas. El porcentaje ya viene calculado en los hechos verificados, con las
-partidas que quedaron sin APU nombradas una por una: úsalo tal cual y cítalas.
+cartilla (100%). No hay un mínimo de cobertura ni un tope de nota: las
+partidas sin cartilla pesan en los criterios (sin cartilla no hay método, ni
+mano de obra, ni materiales que evaluar). El porcentaje ya viene calculado en
+los hechos verificados, con las partidas que quedaron sin APU nombradas una por
+una: úsalo tal cual y cítalas.
 
 Se registra en la Cartilla Excel del Anexo 01, siguiendo el orden del Listado de
 Actividades de la Entrega 1. El estudiante puede poner UNA CARTILLA POR HOJA o
