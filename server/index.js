@@ -8,6 +8,14 @@ import {
 } from './deepReview.js';
 import { cargarReferencias, reportarReferencias } from './referencias.js';
 import {
+  esProyecto, getRubricProyecto, buildSystemPromptProyecto, formatHechosProyecto,
+  buildProyectoRequests, ETIQUETAS_PROYECTO,
+} from './proyecto.js';
+
+// Cada asignatura arma sus tandas a su manera; lo demás del flujo es común.
+const armarTandas = args => (esProyecto(args.delivery) ? buildProyectoRequests(args) : buildDeepReviewRequests(args));
+const etiquetasDe = delivery => (esProyecto(delivery) ? ETIQUETAS_PROYECTO : {});
+import {
   guardarRevision, guardarResultado, cargarRevisiones, eliminarRevision, reportarRevisiones,
 } from './revisiones.js';
 
@@ -270,7 +278,7 @@ app.post('/api/deep-review/adoptar', async (req, res) => {
     // para mostrar el alcance y para avisar si los archivos no son los mismos
     // con los que se lanzó el lote.
     const { listadoText } = splitListadoYCubicaciones(payload.cubicaciones, payload.listado);
-    const { requests, plan } = buildDeepReviewRequests({
+    const { requests, plan } = armarTandas({
       delivery,
       studentName,
       model: MODEL,
@@ -394,8 +402,8 @@ app.get('/api/deep-review/hallazgos', async (req, res) => {
       });
     }
 
-    const { texto, totales } = formatFindingsForConsolidation(findings);
     const ctx = revisiones.get(req.query.batchId);
+    const { texto, totales } = formatFindingsForConsolidation(findings, etiquetasDe(ctx?.delivery));
 
     const cabecera =
       `HALLAZGOS DEL LOTE ${req.query.batchId}\n` +
@@ -459,7 +467,7 @@ app.post('/api/deep-review/start', async (req, res) => {
 
     const { listadoText } = splitListadoYCubicaciones(payload.cubicaciones, payload.listado);
 
-    const { requests, plan } = buildDeepReviewRequests({
+    const { requests, plan } = armarTandas({
       delivery,
       studentName,
       model: MODEL,
@@ -575,7 +583,7 @@ app.post('/api/deep-review/finish', async (req, res) => {
       );
     }
 
-    const { texto, totales } = formatFindingsForConsolidation(findings);
+    const { texto, totales } = formatFindingsForConsolidation(findings, etiquetasDe(ctx.delivery));
 
     // Evaluación final sobre los hallazgos reales de todas las hojas
     const message = await anthropic.messages.create({
@@ -625,7 +633,9 @@ function buildConsolidationContent(ctx, hallazgosTexto, totales) {
   text += getRubric(delivery);
   text += cargarReferencias(delivery).texto;
   text += '\n\n---\n\n';
-  text += formatHechos(payload.admissibility, payload);
+  text += esProyecto(delivery)
+    ? formatHechosProyecto(payload.admissibility, payload)
+    : formatHechos(payload.admissibility, payload);
 
   text += `REVISIÓN HOJA POR HOJA YA REALIZADA
 El trabajo fue revisado completo, hoja por hoja. Abajo están los hallazgos
@@ -642,9 +652,11 @@ ${hallazgosTexto}
 
 `;
 
-  text += `<seccion id="eett" documento="Especificaciones Técnicas">\n`;
-  text += formatEett(payload.eett);
-  text += `</seccion>\n\n`;
+  if (!esProyecto(delivery)) {
+    text += `<seccion id="eett" documento="Especificaciones Técnicas">\n`;
+    text += formatEett(payload.eett);
+    text += `</seccion>\n\n`;
+  }
 
   text += `---\nEntrega la evaluación final: notas por criterio, cuadro resumen, fortalezas y mejoras.`;
   return text;
@@ -652,6 +664,7 @@ ${hallazgosTexto}
 
 // ─── Prompt builders ──────────────────────────────────────────────────────────
 function buildSystemPrompt(delivery) {
+  if (esProyecto(delivery)) return buildSystemPromptProyecto(delivery);
   return `Eres el docente Jonathan Fernando Muñoz Alvarez de la asignatura "Formulación de Proyecto de Título", modalidad Licitación, Ingeniería en Construcción, Universidad Viña del Mar (UVM), Chile.
 
 REGISTRO DE TONO (obligatorio en todo texto que escribas):
@@ -743,6 +756,8 @@ Todo en voz impersonal, sin mencionar sistemas, herramientas ni IA.`;
 
 function buildUserContent(delivery, studentName, payload) {
   const { eett, cubicaciones, listado, cotizaciones, cotizacionesFiles, apu, pdfNames, respaldoPdfs, admissibility } = payload;
+
+  if (esProyecto(delivery)) return buildUserContentProyecto(delivery, studentName, payload);
 
   const contentBlocks = [];
 
@@ -857,6 +872,30 @@ La sección LISTADO es la referencia base para la evaluación cruzada.\n\n`;
   });
 
   return contentBlocks;
+}
+
+/** Evaluación en una sola llamada para Proyecto de Título (sin revisión por tandas). */
+function buildUserContentProyecto(delivery, studentName, payload) {
+  let text = `## CORRECCIÓN ${delivery} — Estudiante: ${studentName}\n\n`;
+  text += getRubric(delivery);
+  text += cargarReferencias(delivery).texto;
+  text += '\n\n---\n\n';
+  text += formatHechosProyecto(payload.admissibility, payload);
+  const libros = [
+    ['rendimientos', 'Planilla de rendimientos', payload.rendimientos],
+    ['gastosGenerales', 'Gastos generales', payload.gastosGenerales],
+    ['presupuesto', 'Presupuesto detallado', payload.presupuesto],
+    ['organigramas', 'Organigramas', payload.organigramas],
+    ['apu', 'Cartillas APU', payload.apu],
+  ];
+  for (const [id, nombre, data] of libros) {
+    if (!data?.sheets?.length) continue;
+    text += `<seccion id="${id}" documento="${nombre}">\n${formatExcel('', data)}</seccion>\n\n`;
+  }
+  for (const g of payload.gantt ?? []) {
+    text += `<seccion id="gantt" documento="Carta Gantt — ${g.name}">\n${(g.pages ?? []).join('\n').slice(0, 60000)}\n</seccion>\n\n`;
+  }
+  return [{ type: 'text', text }, { type: 'text', text: '\n---\nDevuelve SOLO el JSON de evaluación.' }];
 }
 
 // ─── Hechos verificados (inventario medido, no interpretado) ──────────────────
@@ -1013,6 +1052,7 @@ function formatCubSheets(cubSheets) {
 
 // ─── Rubric text ──────────────────────────────────────────────────────────────
 function getRubric(delivery) {
+  if (esProyecto(delivery)) return getRubricProyecto(delivery);
   if (delivery === 'E1') {
     return `## RÚBRICA ENTREGA 1 — Guía de Desarrollo Proyecto de Título (UVM)
 

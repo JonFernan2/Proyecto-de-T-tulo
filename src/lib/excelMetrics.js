@@ -654,7 +654,7 @@ function pareceItemizado(hoja) {
 }
 
 /** Una hoja que trae al menos dos secciones de cartilla APU. */
-function pareceCartillaApu(hoja) {
+export function pareceCartillaApu(hoja) {
   const texto = (hoja.rows ?? [])
     .flat()
     .map(c => String(c?.value ?? ''))

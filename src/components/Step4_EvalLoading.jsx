@@ -10,6 +10,20 @@ const ETIQUETAS = {
   cot: 'Cotizaciones',
   apu: 'Cartillas APU',
   pdf: 'Respaldo PDF de cotizaciones',
+  ren: 'Planilla de rendimientos',
+  gantt: 'Carta Gantt (páginas)',
+  gg: 'Gastos generales',
+  pre: 'Presupuesto detallado',
+  org: 'Organigramas',
+  otras: 'Otras hojas',
+};
+
+// Lo que no puede faltar en la revisión de cada entrega, y dónde asignarlo.
+const ESENCIAL = {
+  E1: { kinds: ['cub'], aviso: 'No se detectaron hojas de cubicaciones. Revisa que el Excel correcto esté asignado al rol «Listado + Cubicaciones» en el paso de archivos.' },
+  E2: { kinds: ['apu'], aviso: 'No se detectaron cartillas APU. Revisa que el Excel del Anexo 01 esté asignado al rol «APU» en el paso de archivos.' },
+  PT1: { kinds: ['ren', 'gantt'], aviso: 'Falta la planilla de rendimientos o la Carta Gantt en PDF. Revisa los roles en el paso de archivos.' },
+  PT2: { kinds: ['gg', 'pre'], aviso: 'No se reconocieron hojas de gastos generales o de presupuesto. Revisa los roles en el paso de archivos.' },
 };
 
 export default function Step4_EvalLoading() {
@@ -167,7 +181,7 @@ export default function Step4_EvalLoading() {
               <div key={p.kind} className="flex justify-between text-sm">
                 <span className="text-slate-700">{ETIQUETAS[p.kind] ?? p.kind}</span>
                 <span className="text-slate-500">
-                  {p.sheets} {p.kind === 'pdf' ? 'páginas' : 'hojas'} · {p.batches} tandas
+                  {p.sheets} {p.kind === 'pdf' || p.kind === 'gantt' ? 'páginas' : 'hojas'} · {p.batches} tandas
                   {p.conImagenes > 0 && (
                     <span className="text-uvm-blue"> · {p.conImagenes} con respaldo</span>
                   )}
@@ -185,19 +199,11 @@ export default function Step4_EvalLoading() {
           ))}
           {/* Cada entrega echa en falta lo suyo: en la Entrega 2 no se piden
               cubicaciones, y avisar de su ausencia confundía más que ayudaba. */}
-          {delivery === 'E2'
-            ? !plan.some(p => p.kind === 'apu') && (
-                <div className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                  No se detectaron cartillas APU. Revisa que el Excel del Anexo 01 esté
-                  asignado al rol «APU» en el paso de archivos.
-                </div>
-              )
-            : !plan.some(p => p.kind === 'cub') && (
-                <div className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                  No se detectaron hojas de cubicaciones. Revisa que el Excel correcto esté
-                  asignado al rol «Listado + Cubicaciones» en el paso de archivos.
-                </div>
-              )}
+          {ESENCIAL[delivery] && !ESENCIAL[delivery].kinds.every(k => plan.some(p => p.kind === k)) && (
+            <div className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              {ESENCIAL[delivery].aviso}
+            </div>
+          )}
         </div>
       )}
 

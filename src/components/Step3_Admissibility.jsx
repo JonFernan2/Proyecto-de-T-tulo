@@ -3,6 +3,7 @@ import { useGradingStore } from '../store/useGradingStore.js';
 import { runAdmissibility } from '../lib/admissibility.js';
 import { generateFeedbackPDF } from '../lib/pdfExport.js';
 import { adoptarRevision } from '../lib/claudeEval.js';
+import { esProyecto } from '../lib/rubric.js';
 
 export default function Step3_Admissibility() {
   const {
@@ -108,8 +109,9 @@ export default function Step3_Admissibility() {
               <div className="text-lg font-bold text-green-700">Entrega en evaluación</div>
               <div className="text-sm text-slate-600 mt-0.5">
                 En esta entrega no se filtra por admisibilidad: todas pasan a evaluación.
-                Lo que se verifica aquí es cuántas partidas del itemizado tienen su cartilla
-                APU — se espera el 100%.
+                {esProyecto(delivery)
+                  ? ' Lo que se muestra aquí se midió directamente sobre los archivos y viaja a la revisión como hecho verificado.'
+                  : ' Lo que se verifica aquí es cuántas partidas del itemizado tienen su cartilla APU — se espera el 100%.'}
               </div>
             </div>
           </div>
@@ -159,7 +161,7 @@ export default function Step3_Admissibility() {
                     {Math.round(r.ratio * 100)}% alcanzado
                   </span>
                   <span className="text-slate-500">
-                    {r.id === 'apu' ? 'se espera' : 'mínimo'} {Math.round(r.threshold * 100)}%
+                    {r.threshold === 1 ? 'se espera' : 'mínimo'} {Math.round(r.threshold * 100)}%
                   </span>
                 </div>
                 <div className="w-full bg-slate-200 rounded-full h-2">

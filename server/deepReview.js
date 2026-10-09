@@ -238,8 +238,8 @@ export function esHojaListado(name) {
 // ─── Prefijo cacheado ────────────────────────────────────────────────────────
 // Idéntico byte a byte en todas las tandas del mismo tipo, para que el listado
 // se cobre una vez y las tandas siguientes lo lean del caché.
-function buildCachedPrefix({ studentName, rubric, listadoText, referencias, kind, instrucciones }) {
-  const cabecera = `Corrección de la entrega de ${studentName} en la asignatura Formulación de Proyecto de Título (Ingeniería en Construcción, Universidad Viña del Mar), a cargo del docente Jonathan Fernando Muñoz Alvarez.
+export function buildCachedPrefix({ studentName, rubric, listadoText, referencias, kind, instrucciones, asignatura = 'Formulación de Proyecto de Título' }) {
+  const cabecera = `Corrección de la entrega de ${studentName} en la asignatura ${asignatura} (Ingeniería en Construcción, Universidad Viña del Mar), a cargo del docente Jonathan Fernando Muñoz Alvarez.
 
 REGISTRO DE TONO (obligatorio en cada hallazgo que redactes):
 Voz IMPERSONAL con "se" (pasiva refleja), registro académico formal chileno.
@@ -421,11 +421,11 @@ export function partirHojasLargas(sheets, maxFilas = MAX_ROWS_PER_SHEET) {
   return salida;
 }
 
-function formatSheetsChunk(sheets, kind, n, total) {
-  const etiqueta = { cub: 'CUBICACIONES', cot: 'COTIZACIONES', apu: 'APU' }[kind] ?? kind;
+export function formatSheetsChunk(sheets, kind, n, total, etiquetaPropia = null) {
+  const etiqueta = etiquetaPropia ?? { cub: 'CUBICACIONES', cot: 'COTIZACIONES', apu: 'APU' }[kind] ?? kind;
   const bloques = [];
   let texto = `TANDA ${n} de ${total} — ${sheets.length} hoja(s) de ${etiqueta}.\n`;
-  texto += kind === 'apu'
+  texto += kind === 'apu' && !etiquetaPropia
       ? `Revisa TODAS las hojas de esta tanda. Una hoja puede traer varias cartillas: entrega una entrada por CARTILLA, no por hoja.\n\n`
       : `Revisa TODAS las hojas de esta tanda y entrega una entrada por cada una.\n\n`;
 
@@ -495,19 +495,19 @@ function formatSheetsChunk(sheets, kind, n, total) {
  * Convierte los hallazgos de todas las tandas en el bloque de texto que
  * alimenta la evaluación final.
  */
-export function formatFindingsForConsolidation(findings) {
-  const grupos = { cub: [], cot: [], apu: [], pdf: [] };
-  for (const f of findings) {
-    const kind = f.custom_id.split('-')[0];
-    if (grupos[kind]) grupos[kind].push(f);
-  }
-
+export function formatFindingsForConsolidation(findings, etiquetasPropias = {}) {
   const etiquetas = {
     cub: 'CUBICACIONES',
     cot: 'COTIZACIONES',
     apu: 'APU — ANÁLISIS DE PRECIOS UNITARIOS',
     pdf: 'RESPALDO EN PDF DE LAS COTIZACIONES',
+    ...etiquetasPropias,
   };
+  const grupos = Object.fromEntries(Object.keys(etiquetas).map(k => [k, []]));
+  for (const f of findings) {
+    const kind = f.custom_id.split('-')[0];
+    if (grupos[kind]) grupos[kind].push(f);
+  }
 
   let out = '';
   let totalErrores = 0;
@@ -557,7 +557,7 @@ export function formatFindingsForConsolidation(findings) {
 }
 
 // ─── Utilidades ──────────────────────────────────────────────────────────────
-function chunkArray(arr, size) {
+export function chunkArray(arr, size) {
   const out = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
   return out;

@@ -72,6 +72,19 @@ async function textoDeLaHoja(zip, leer, wbRels, rid) {
     .map(shape => [...shape.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m => decodificarXml(m[1])).join(''))
     .filter(t => t.trim());
 
+  // Los organigramas suelen hacerse con SmartArt, que no guarda su texto en el
+  // dibujo sino en un archivo de datos aparte, enlazado desde él. Cada nodo es
+  // un cargo: se lee uno por renglón.
+  const relsDibujo = parsearRels(await leer(rutaRels(rutaDibujo)));
+  for (const destinoDatos of Object.values(relsDibujo).filter(t => /diagrams\/data\d*\.xml$/i.test(t))) {
+    const datos = await leer(resolverRuta(rutaDibujo, destinoDatos));
+    if (!datos) continue;
+    const nodos = (datos.match(/<dgm:pt\b[\s\S]*?<\/dgm:pt>/g) ?? [])
+      .map(pt => [...pt.matchAll(/<a:t>([^<]*)<\/a:t>/g)].map(m => decodificarXml(m[1])).join(''))
+      .filter(t => t.trim());
+    if (nodos.length) textos.push(`[SMARTART] ${nodos.join(' · ')}`);
+  }
+
   return textos.join('\n');
 }
 

@@ -3,10 +3,16 @@ import mammoth from 'mammoth';
 import JSZip from 'jszip';
 import { extraerImagenesIncrustadas } from './xlsxImages.js';
 import { extraerCuadrosDeTexto } from './xlsxTextboxes.js';
-import * as pdfjsLib from 'pdfjs-dist';
+// La versión «legacy» de pdf.js: la moderna usa funciones de JavaScript tan
+// recientes (Map.getOrInsertComputed) que en navegadores de hace un año falla
+// al dibujar una página, y sin dibujo no hay imágenes de la Carta Gantt.
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 
+// La ruta va relativa a este archivo: escrita como «pdfjs-dist/…» se buscaba
+// dentro de src/lib, daba 404, y pdf.js trabajaba sin worker, en el hilo de la
+// página.
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.min.mjs',
+  '../../node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs',
   import.meta.url,
 ).href;
 
@@ -48,6 +54,9 @@ export async function parseExcel(file) {
           value: cell.w ?? cell.v ?? '',   // formatted text
           formula: cell.f ?? null,          // raw formula string
           type: cell.t,                     // type: n=number, s=string, b=bool
+          // El número sin formato: «0,18» en pantalla puede ser 0,1764, y
+          // comprobar duraciones o montos con lo redondeado daría falsos errores.
+          ...(cell.t === 'n' && typeof cell.v === 'number' ? { raw: cell.v } : {}),
         });
       }
       // Skip entirely empty rows
@@ -208,11 +217,21 @@ function decodeXmlText(s) {
 }
 
 // ─── PDF (EETT) ───────────────────────────────────────────────────────────────
-export async function parsePdf(file) {
+// La Carta Gantt viene en A0 o A1. Se dibuja al doble del lado que admite la
+// API para poder partirla en cuadrantes legibles; el texto se toma aparte, de
+// la capa de texto del PDF. La pauta pide una sola plana, así que se dibujan
+// las primeras páginas nada más.
+const GANTT_LADO_IMAGEN = 3136;
+const GANTT_MAX_PAGINAS_IMAGEN = 3;
+
+export async function parsePdf(file, { imagenes = false } = {}) {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
   const pages = [];
+  // Tamaño de cada página en milímetros: la pauta exige la Gantt en A0 o A1.
+  const tamanos = [];
+  const imagenesPaginas = [];
   let highlightCount = 0;
   let strikeCount = 0;
   let totalAnnotations = 0;
@@ -223,7 +242,16 @@ export async function parsePdf(file) {
     const page = await pdf.getPage(i);
 
     const textContent = await page.getTextContent();
-    pages.push(textContent.items.map(item => item.str).join(' ').trim());
+    pages.push(textoPorRenglones(textContent.items));
+
+    const vista = page.getViewport({ scale: 1 });
+    tamanos.push({ anchoMm: Math.round(vista.width * 25.4 / 72), altoMm: Math.round(vista.height * 25.4 / 72) });
+
+    if (imagenes && i <= GANTT_MAX_PAGINAS_IMAGEN) {
+      for (const img of await renderizarPagina(page, GANTT_LADO_IMAGEN)) {
+        imagenesPaginas.push({ ...img, pagina: i });
+      }
+    }
 
     for (const a of await page.getAnnotations()) {
       totalAnnotations++;
@@ -251,6 +279,8 @@ export async function parsePdf(file) {
   return {
     text: fullText,
     pages,
+    tamanos,
+    ...(imagenes ? { imagenes: imagenesPaginas } : {}),
     numPages: pdf.numPages,
     paginasConTexto,
     escaneado,
@@ -267,6 +297,74 @@ export async function parsePdf(file) {
     strikeSamples,
     highlightColors: [],
   };
+}
+
+/**
+ * El texto de una página respetando los renglones.
+ *
+ * pdfjs entrega los fragmentos sueltos; unirlos todos con espacios mezcla las
+ * columnas de una tabla —el nombre de una tarea, su duración y su predecesora
+ * quedaban en una sola tira—. Se corta un renglón cada vez que cambia la altura.
+ */
+function textoPorRenglones(items) {
+  let texto = '';
+  let y = null;
+  for (const it of items) {
+    const yi = it.transform?.[5];
+    if (y !== null && yi !== undefined && Math.abs(yi - y) > 2) texto += '\n';
+    else if (texto && !texto.endsWith(' ')) texto += ' ';
+    texto += it.str;
+    if (yi !== undefined) y = yi;
+  }
+  return texto.replace(/[ \t]+\n/g, '\n').trim();
+}
+
+/**
+ * Dibuja una página del PDF como imágenes JPEG. Solo en el navegador.
+ *
+ * La API reduce toda imagen a unos 1.568 px de lado: una Gantt A0 entera a ese
+ * tamaño deja ver los colores pero no qué barra es de qué tarea. Por eso se
+ * entrega la vista completa y además la página partida en cuatro cuadrantes,
+ * cada uno a resolución útil.
+ */
+async function renderizarPagina(page, ladoMax) {
+  if (typeof document === 'undefined') return [];
+  try {
+    const base = page.getViewport({ scale: 1 });
+    const escala = Math.min(6, ladoMax / Math.max(base.width, base.height));
+    const vista = page.getViewport({ scale: escala });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(vista.width);
+    canvas.height = Math.round(vista.height);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport: vista }).promise;
+
+    const recorte = (x, y, w, h, lado, vistaNombre) => {
+      const k = Math.min(1, lado / Math.max(w, h));
+      const c = document.createElement('canvas');
+      c.width = Math.round(w * k);
+      c.height = Math.round(h * k);
+      c.getContext('2d').drawImage(canvas, x, y, w, h, 0, 0, c.width, c.height);
+      return { data: c.toDataURL('image/jpeg', 0.82).split(',')[1], mediaType: 'image/jpeg', vista: vistaNombre };
+    };
+
+    const W = canvas.width;
+    const H = canvas.height;
+    const mw = Math.ceil(W / 2);
+    const mh = Math.ceil(H / 2);
+    return [
+      recorte(0, 0, W, H, 1568, 'página completa'),
+      recorte(0, 0, mw, mh, 1568, 'cuadrante superior izquierdo'),
+      recorte(W - mw, 0, mw, mh, 1568, 'cuadrante superior derecho'),
+      recorte(0, H - mh, mw, mh, 1568, 'cuadrante inferior izquierdo'),
+      recorte(W - mw, H - mh, mw, mh, 1568, 'cuadrante inferior derecho'),
+    ];
+  } catch (err) {
+    console.warn('[pdf] No se pudo dibujar la página:', err.message);
+    return [];
+  }
 }
 
 // ─── Image → base64 ───────────────────────────────────────────────────────────

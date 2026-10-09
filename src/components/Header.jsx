@@ -1,9 +1,11 @@
 import React from 'react';
 import { useGradingStore } from '../store/useGradingStore.js';
+import { nombreCurso } from '../lib/rubric.js';
 
 export default function Header() {
   const reset = useGradingStore(s => s.reset);
   const step = useGradingStore(s => s.step);
+  const delivery = useGradingStore(s => s.delivery);
 
   return (
     <header className="bg-uvm-blue text-white shadow-md">
@@ -13,7 +15,7 @@ export default function Header() {
             Universidad Viña del Mar · Ingeniería en Construcción
           </div>
           <div className="text-base font-bold leading-tight">
-            Corrector IA — Formulación de Proyecto de Título
+            Corrector IA — {delivery ? nombreCurso(delivery) : 'Proyecto de Título'}
           </div>
         </div>
         {step !== 'setup' && (

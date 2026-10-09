@@ -48,7 +48,8 @@ export default function LanzadorCurso({ carpetas, delivery, onListo, onCancelar 
     const entradas = [];
     for (const file of archivos) {
       if (ES_IMAGEN.test(file.name)) continue;
-      entradas.push({ file, role: guessRole(file, delivery), parsed: await parsear(file) });
+      const role = guessRole(file, delivery);
+      entradas.push({ file, role, parsed: await parsear(file, role) });
     }
 
     const filesMap = construirFilesMap(entradas);
@@ -265,12 +266,12 @@ function seCruzaConElItemizado(admissibility) {
   return (admissibility?.results ?? []).find(r => r.id === 'apu')?.ratio !== undefined;
 }
 
-async function parsear(file) {
+async function parsear(file, role) {
   const ext = file.name.split('.').pop().toLowerCase();
   try {
     if (ext === 'docx' || ext === 'doc') return await parseWord(file);
     if (ext === 'xlsx' || ext === 'xls') return await parseExcel(file);
-    if (ext === 'pdf') return await parsePdf(file);
+    if (ext === 'pdf') return await parsePdf(file, { imagenes: role === 'gantt' });
   } catch (err) {
     console.warn(`[curso] No se pudo leer ${file.name}: ${err.message}`);
   }

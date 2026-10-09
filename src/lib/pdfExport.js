@@ -1,5 +1,6 @@
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { DELIVERIES, nombreCurso } from './rubric.js';
 
 const BLUE = [30, 58, 95];     // UVM blue
 const GOLD = [200, 169, 81];   // UVM gold
@@ -37,7 +38,7 @@ export function generateFeedbackPDF({ delivery, studentName, admissibility, crit
 
   doc.setFontSize(9);
   doc.setFont('helvetica', 'normal');
-  doc.text('Ingeniería en Construcción  ·  Formulación de Proyecto de Título', 14, 16);
+  doc.text(`Ingeniería en Construcción  ·  ${nombreCurso(delivery)}`, 14, 16);
   doc.text('Jonathan Fernando Muñoz Alvarez  ·  Docente', 14, 21);
 
   y = 34;
@@ -51,7 +52,7 @@ export function generateFeedbackPDF({ delivery, studentName, admissibility, crit
   doc.text(`Estudiante: ${studentName}`, 18, y + 6);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  const delivLabel = delivery === 'E1' ? 'Entrega 1' : 'Entrega 2';
+  const delivLabel = DELIVERIES[delivery]?.label ?? delivery;
   doc.text(`${delivLabel}`, 18, y + 12);
   doc.text(`Fecha: ${new Date().toLocaleDateString('es-CL')}`, W - 50, y + 6);
 
@@ -325,7 +326,7 @@ export function generateFeedbackPDF({ delivery, studentName, admissibility, crit
     doc.setTextColor(...WHITE);
     doc.setFontSize(7);
     doc.setFont('helvetica', 'normal');
-    doc.text(`Formulación de Proyecto de Título  ·  Universidad Viña del Mar  ·  ${new Date().getFullYear()}`, W / 2, 289, { align: 'center' });
+    doc.text(`${nombreCurso(delivery)}  ·  Universidad Viña del Mar  ·  ${new Date().getFullYear()}`, W / 2, 289, { align: 'center' });
     doc.text(`Pág. ${i} / ${pageCount}`, W - 16, 289, { align: 'right' });
   }
 

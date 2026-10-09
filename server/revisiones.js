@@ -151,6 +151,13 @@ function adelgazar(payload = {}) {
     listado: resumenLibro(payload.listado),
     cotizaciones: resumenLibro(payload.cotizaciones),
     apu: resumenLibro(payload.apu),
+    rendimientos: resumenLibro(payload.rendimientos),
+    gastosGenerales: resumenLibro(payload.gastosGenerales),
+    presupuesto: resumenLibro(payload.presupuesto),
+    organigramas: resumenLibro(payload.organigramas),
+    // Las imágenes de la Gantt pesan megas: para el informe basta con el nombre.
+    gantt: (payload.gantt ?? []).map(g => ({ name: g.name, numPages: g.numPages, escaneado: g.escaneado })),
+    projectNames: payload.projectNames ?? [],
 
     // El inventario solo cuenta cuántas cotizaciones llegaron en Word; basta
     // con conservar esa marca, no el texto.

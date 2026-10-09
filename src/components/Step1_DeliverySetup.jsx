@@ -1,6 +1,6 @@
 import React from 'react';
 import { useGradingStore } from '../store/useGradingStore.js';
-import { DELIVERIES } from '../lib/rubric.js';
+import { DELIVERIES, CURSOS, nombreCurso } from '../lib/rubric.js';
 import RevisionesPendientes from './RevisionesPendientes.jsx';
 
 export default function Step1_DeliverySetup() {
@@ -19,27 +19,32 @@ export default function Step1_DeliverySetup() {
 
       <RevisionesPendientes />
 
-      {/* Delivery selector */}
-      <div>
-        <label className="block text-sm font-semibold text-slate-700 mb-3">Seleccionar entrega</label>
-        <div className="grid grid-cols-2 gap-4">
-          {Object.entries(DELIVERIES).map(([key, def]) => (
-            <button
-              key={key}
-              onClick={() => setDelivery(key)}
-              className={`p-4 rounded-xl border-2 text-left transition-all
-                ${delivery === key
-                  ? 'border-uvm-blue bg-blue-50 shadow-sm'
-                  : 'border-slate-200 bg-white hover:border-slate-300'
-                }`}
-            >
-              <div className="font-bold text-uvm-blue text-lg">{key}</div>
-              <div className="font-semibold text-slate-800 text-sm">{def.label}</div>
-              <div className="text-xs text-slate-500 mt-1">{def.subtitle}</div>
-              <div className="text-xs text-slate-400 mt-2">Fecha límite: {def.dueDate}</div>
-            </button>
-          ))}
-        </div>
+      {/* Delivery selector, agrupado por asignatura */}
+      <div className="space-y-5">
+        <label className="block text-sm font-semibold text-slate-700">Seleccionar entrega</label>
+        {Object.entries(CURSOS).map(([curso, nombre]) => (
+          <div key={curso}>
+            <div className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">{nombre}</div>
+            <div className="grid grid-cols-2 gap-4">
+              {Object.entries(DELIVERIES).filter(([, def]) => def.curso === curso).map(([key, def]) => (
+                <button
+                  key={key}
+                  onClick={() => setDelivery(key)}
+                  className={`p-4 rounded-xl border-2 text-left transition-all
+                    ${delivery === key
+                      ? 'border-uvm-blue bg-blue-50 shadow-sm'
+                      : 'border-slate-200 bg-white hover:border-slate-300'
+                    }`}
+                >
+                  <div className="font-bold text-uvm-blue text-lg">{key}</div>
+                  <div className="font-semibold text-slate-800 text-sm">{def.label}</div>
+                  <div className="text-xs text-slate-500 mt-1">{def.subtitle}</div>
+                  {def.dueDate && <div className="text-xs text-slate-400 mt-2">Fecha límite: {def.dueDate}</div>}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Student name */}
@@ -64,7 +69,7 @@ export default function Step1_DeliverySetup() {
       {delivery && (
         <div className="bg-slate-50 rounded-xl border border-slate-200 p-4">
           <div className="text-sm font-semibold text-slate-700 mb-3">
-            Rúbrica de evaluación — {DELIVERIES[delivery].label}
+            Rúbrica de evaluación — {nombreCurso(delivery)} · {DELIVERIES[delivery].label}
           </div>
           <div className="space-y-2">
             {DELIVERIES[delivery].criteria.map(c => (

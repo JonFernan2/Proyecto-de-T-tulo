@@ -12,6 +12,8 @@ export function guessRole(file, delivery) {
   const name = file.name.toLowerCase();
   const ext = name.split('.').pop();
 
+  if (delivery === 'PT1' || delivery === 'PT2') return rolProyecto(name, ext, delivery);
+
   if (ext === 'docx' || ext === 'doc') {
     if (/cotiz|cot_|proveedor|presupuesto/.test(name)) return 'cotizaciones';
     return 'eett';
@@ -34,6 +36,30 @@ export function guessRole(file, delivery) {
     return 'cubicaciones';
   }
   return 'respaldo';
+}
+
+/**
+ * Proyecto de Título. Los nombres que ponen los estudiantes son muy variados,
+ * así que se prueba de lo más específico a lo más general; lo que no calce
+ * cae en el entregable principal de la entrega, que es lo más probable.
+ */
+function rolProyecto(name, ext, delivery) {
+  if (ext === 'mpp' || ext === 'mpx' || ext === 'mpt') return 'project';
+  if (ext === 'pdf') {
+    if (/itemizado|listado|partidas/.test(name)) return 'listado';
+    return 'gantt';
+  }
+  if (ext !== 'xlsx' && ext !== 'xls' && ext !== 'xlsm') return 'respaldo';
+
+  if (/itemizado|listado/.test(name)) return 'listado';
+  if (delivery === 'PT1') {
+    if (/apu|precios?\s*unitarios?|cartilla/.test(name) && !/rendim/.test(name)) return 'apu';
+    return 'rendimientos';
+  }
+  if (/organi/.test(name)) return 'organigramas';
+  if (/gasto|gg\b|g\.g\./.test(name)) return 'gastosGenerales';
+  if (/apu|precios?\s*unitarios?|cartilla/.test(name) && !/presupuesto/.test(name)) return 'apu';
+  return 'presupuesto';
 }
 
 /**
@@ -114,6 +140,26 @@ export function construirFilesMap(entradas) {
       })),
 
     apu: mergeExcel('apu'),
+
+    // ── Proyecto de Título ────────────────────────────────────────────────────
+    rendimientos: mergeExcel('rendimientos'),
+    gastosGenerales: mergeExcel('gastosGenerales'),
+    presupuesto: mergeExcel('presupuesto'),
+    organigramas: mergeExcel('organigramas'),
+    // La Carta Gantt llega en PDF: su texto se revisa como tabla y sus
+    // imágenes, como dibujo.
+    gantt: ofRole('gantt')
+      .filter(e => ext(e) === 'pdf' && e.parsed?.pages)
+      .map(e => ({
+        name: e.file.name,
+        pages: e.parsed.pages,
+        numPages: e.parsed.numPages,
+        tamanos: e.parsed.tamanos ?? [],
+        imagenes: e.parsed.imagenes ?? [],
+        escaneado: e.parsed.escaneado,
+      })),
+    // El .mpp no se puede abrir aquí: basta con saber que se entregó.
+    projectNames: ofRole('project').map(e => e.file.name),
 
     respaldoPdfNames: [
       ...namesOf('respaldo', ['pdf']),

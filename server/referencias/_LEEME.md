@@ -14,6 +14,15 @@ Los archivos que empiezan con `_` (como este) se ignoran.
   · NCh353-reglas-de-medicion.md (~6.800 tokens)
 ```
 
+## A qué entregas se aplica
+
+El prefijo del nombre decide en qué revisiones viaja el documento:
+
+- `E1-…` o `E2-…`: solo en esa entrega de Formulación.
+- Sin prefijo: en todas las entregas de Formulación.
+- `PT-…`: en las dos entregas de Proyecto de Título; `PT1-…` o `PT2-…`, solo en
+  esa. Proyecto de Título no lee los documentos sin prefijo.
+
 ## Qué conviene poner aquí
 
 Reglas y criterios que el corrector deba aplicar de forma constante:
@@ -35,6 +44,10 @@ la atención sobre lo que importa.
 Un PDF no sirve directamente — hay que convertirlo a texto antes de dejarlo acá.
 
 ## Lo que ya está cargado
+
+- **PT-pauta-proyecto-de-titulo.md** — extracto de la pauta para las Entregas 1
+  y 2 de Proyecto de Título: rendimientos, Carta Gantt, gastos generales con sus
+  valores referenciales, presupuesto, recuadro final y organigramas.
 
 - **NCh353-reglas-de-medicion.md** — reglas operativas de la norma chilena de
   cubicación de obras de edificación: descuento de vanos por material,

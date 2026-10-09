@@ -6,23 +6,6 @@ import { parseExcel, parseWord, parsePdf, parseImage, detectStudentName } from '
 import { guessRole, agruparPorEstudiante, detectarMezcla } from '../lib/roles.js';
 import LanzadorCurso from './LanzadorCurso.jsx';
 
-const ROLE_OPTIONS_E1 = [
-  { value: 'eett', label: 'EETT (Word / PDF)' },
-  { value: 'listado', label: 'Listado / Itemizado' },
-  { value: 'cubicaciones', label: 'Cubicaciones' },
-  { value: 'cotizaciones', label: 'Cotizaciones' },
-  { value: 'respaldo', label: 'Respaldo PDF (cotizaciones)' },
-  { value: 'imagen', label: 'Imagen (respaldo cubicaciones)' },
-];
-
-const ROLE_OPTIONS_E2 = [
-  { value: 'eett', label: 'EETT (Word / PDF)' },
-  { value: 'listado', label: 'Listado / Itemizado E1 (Excel o PDF)' },
-  { value: 'cubicaciones', label: 'Cubicaciones E1' },
-  { value: 'cotizaciones', label: 'Cotizaciones E1' },
-  { value: 'apu', label: 'APU — Cartillas (Anexo 01)' },
-];
-
 // Los apellidos se detectan en minúsculas; en pantalla se leen mejor así.
 function conMayusculas(texto) {
   return texto.replace(/\b\p{Ll}/gu, c => c.toUpperCase());
@@ -34,6 +17,7 @@ function fileTypeIcon(file) {
   if (ext === 'xlsx' || ext === 'xls') return '📊';
   if (ext === 'pdf') return '📕';
   if (['jpg', 'jpeg', 'png', 'webp'].includes(ext)) return '🖼️';
+  if (ext === 'mpp') return '📅';
   return '📎';
 }
 
@@ -45,7 +29,7 @@ export default function Step2_FileUpload() {
   const [modoCurso, setModoCurso] = useState(false);
   const [mezclaAceptada, setMezclaAceptada] = useState(false);
   const expectedFiles = DELIVERIES[delivery]?.expectedFiles ?? [];
-  const roleOptions = delivery === 'E2' ? ROLE_OPTIONS_E2 : ROLE_OPTIONS_E1;
+  const roleOptions = DELIVERIES[delivery]?.roles ?? [];
 
   const parseFile = useCallback(async (id, file, role) => {
     setParsing(p => ({ ...p, [id]: true }));
@@ -62,7 +46,10 @@ export default function Step2_FileUpload() {
         // Todos los PDF se leen, no solo las EETT: los de respaldo de
         // cotizaciones traen proveedor, precio y año, que hay que cotejar
         // contra la planilla.
-        parsed = await parsePdf(file);
+        // La Carta Gantt se mira además como imagen: la ruta crítica en rojo,
+        // los días no laborables en gris y las barras negras de los títulos
+        // solo se ven dibujados.
+        parsed = await parsePdf(file, { imagenes: role === 'gantt' });
       }
       setParsed(id, parsed);
     } catch (err) {
@@ -310,7 +297,9 @@ export default function Step2_FileUpload() {
                   const newRole = e.target.value;
                   updateFileRole(entry.id, newRole);
                   const ext = entry.file.name.split('.').pop().toLowerCase();
-                  if (ext === 'pdf' && !entry.parsed) parseFile(entry.id, entry.file, newRole);
+                  if (ext === 'pdf' && (!entry.parsed || (newRole === 'gantt' && !entry.parsed.imagenes))) {
+                    parseFile(entry.id, entry.file, newRole);
+                  }
                 }}
                 className="text-xs border border-slate-300 rounded px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-uvm-blue"
               >

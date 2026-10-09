@@ -1,4 +1,5 @@
 import { countListadoItems, medirCotizaciones, extraerPartidasListado, extraerPartidasDePdf, medirApu } from './excelMetrics.js';
+import { admisibilidadProyecto } from './admisibilidadProyecto.js';
 
 // Umbral mínimo exigido para cubicaciones y cotizaciones (pauta: 50%).
 export const UMBRAL_CUBICACIONES = 0.5;
@@ -17,6 +18,14 @@ export const APU_ESPERADO = 1.0;
  * carry roughly one sheet per activity.
  */
 export function runAdmissibility(delivery, filesMap) {
+  // Proyecto de Título tiene sus propias verificaciones. El itemizado, si
+  // llegó, es contra lo que se cruzan rendimientos y presupuesto.
+  if (delivery === 'PT1' || delivery === 'PT2') {
+    const itemizado = primerListadoConItems([filesMap.listado, filesMap.apu], filesMap.respaldoPdfs);
+    const r = admisibilidadProyecto(delivery, filesMap, itemizado);
+    return { ...r, resumen: buildResumen(r.results, itemizado.length) };
+  }
+
   const results = [];
 
   // ── Cross-reference baseline ────────────────────────────────────────────────

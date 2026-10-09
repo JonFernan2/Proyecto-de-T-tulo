@@ -209,6 +209,13 @@ function buildPayload({ filesMap, admissibility }) {
         : f.parsed,
     })),
     apu: filesMap.apu ?? null,
+    // Proyecto de Título
+    rendimientos: filesMap.rendimientos ?? null,
+    gastosGenerales: filesMap.gastosGenerales ?? null,
+    presupuesto: filesMap.presupuesto ?? null,
+    organigramas: filesMap.organigramas ?? null,
+    gantt: filesMap.gantt ?? [],
+    projectNames: filesMap.projectNames ?? [],
     pdfNames: filesMap.respaldoPdfNames ?? [],
     respaldoPdfs: filesMap.respaldoPdfs ?? [],
     // Se guarda entera, no solo label+detail: al retomar una revisión lanzada

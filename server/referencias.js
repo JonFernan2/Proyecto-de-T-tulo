@@ -26,12 +26,20 @@ const cache = new Map();
 
 /**
  * Un archivo que empieza por "E1-" o "E2-" pertenece solo a esa entrega. El
- * resto rigen siempre. Sin esto, las reglas del APU viajarían en cada tanda de
- * una revisión de Entrega 1, encareciéndola y dándole criterios que no aplican.
+ * resto rigen en Formulación. Sin esto, las reglas del APU viajarían en cada
+ * tanda de una revisión de Entrega 1, encareciéndola y dándole criterios que
+ * no aplican.
+ *
+ * Proyecto de Título solo lee los que empiezan por "PT-" (ambas entregas),
+ * "PT1-" o "PT2-": las reglas de cubicación y del APU de Formulación no rigen
+ * sus rendimientos ni su presupuesto.
  */
 function aplicaA(nombre, delivery) {
-  const m = /^(E\d)[-_]/i.exec(nombre);
-  return !m || !delivery || m[1].toUpperCase() === delivery.toUpperCase();
+  const m = /^(E\d|PT\d?)[-_]/i.exec(nombre);
+  const prefijo = m?.[1].toUpperCase();
+  if (!delivery) return true;
+  if (/^PT/i.test(delivery)) return prefijo === 'PT' || prefijo === delivery.toUpperCase();
+  return !m || prefijo === delivery.toUpperCase();
 }
 
 export function cargarReferencias(delivery = null) {
@@ -96,7 +104,7 @@ export function reportarReferencias() {
   console.log(`[referencias] ${archivos.length} documento(s) · ~${total.toLocaleString('es-CL')} tokens (cacheados):`);
   for (const a of archivos) {
     const aviso = a.chars > AVISO_CHARS ? '  ← conviene resumirlo' : '';
-    const soloPara = /^(E\d)[-_]/i.exec(a.nombre);
+    const soloPara = /^(E\d|PT\d?)[-_]/i.exec(a.nombre);
     const alcance = soloPara ? `  · solo ${soloPara[1].toUpperCase()}` : '';
     console.log(`  · ${a.nombre} (~${a.tokensAprox.toLocaleString('es-CL')} tokens)${alcance}${aviso}`);
   }
